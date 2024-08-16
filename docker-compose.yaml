@@ -4,24 +4,30 @@ services:
   game-server:
     build:
       context: ./game-server
-    image: cloudolife/col-rust-docker
-    container_name: game-server-schnapsen
+    container_name: game-server
     command: cargo run
     ports:
-    - "5050:5050"
+      - "5050:5050"
     restart: on-failure
     volumes:
       - "./game-server:/usr/game-server"
+    networks:
+      - game-night-network
 
   schnapsen-duo-server:
     build:
-      context: ./game-server
-    image: cloudolife/col-rust-docker
+      context: ./schnapsen-duo-server
     container_name: schnapsen-duo-server
     command: cargo run
     ports:
-    - "6000:6000"
+      - "6060:6060"
     restart: on-failure
     volumes:
       - "./schnapsen-duo-server:/usr/schnapsen-duo-server"
       - "./schnapsen-rs:/usr/schnapsen-rs"
+    networks:
+      - game-night-network
+
+networks:
+  game-night-network:
+    external: true

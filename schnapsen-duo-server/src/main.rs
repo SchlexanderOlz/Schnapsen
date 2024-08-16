@@ -3,17 +3,21 @@ use std::sync::{Arc, Mutex};
 use listener::MatchCreated;
 use axum;
 use socketioxide::extract::{Data, SocketRef};
+use tracing::info;
+use tracing_subscriber::FmtSubscriber;
 
 mod listener;
 mod translator;
 mod performer;
 
-const DEFAULT_URL: &str = "0.0.0.0:6000"; // TODO: Set the default URL correctly at some point and register it at the game-server
+const DEFAULT_URL: &str = "0.0.0.0:6060"; // TODO: Set the default URL correctly at some point and register it at the game-server
 
 
 
 #[tokio::main]
 async fn main() {
+    tracing::subscriber::set_global_default(FmtSubscriber::default()).unwrap();
+    info!("Starting Schnapsen Duo Server");
     let listener = tokio::net::TcpListener::bind(DEFAULT_URL).await.unwrap();
     let (layer, io) = socketioxide::SocketIo::new_layer();
     let io = Arc::new(io);
@@ -21,6 +25,7 @@ async fn main() {
     let router = axum::Router::new().layer(layer);
 
     let on_create = move |new_match: listener::CreateMatch| {
+        info!("Creating new match: {:?}", new_match);
         let io = io.clone();
         let instance = Arc::new(Mutex::new(()));
 
@@ -48,6 +53,7 @@ async fn main() {
             }
         }
     };
-    let router = listener::listen(router, on_create).await;
+    let router = listener::listen(router, on_create);
+    info!("Listening on {}", DEFAULT_URL);
     axum::serve(listener, router).await.unwrap();
 }

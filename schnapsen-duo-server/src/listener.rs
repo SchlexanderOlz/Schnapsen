@@ -24,7 +24,7 @@ pub struct MatchCreated {
     pub read: String,
 }
 
-pub async fn listen<T, F>(router: axum::Router<Arc<T>>, on_create: T) -> axum::Router
+pub fn listen<T, F>(router: axum::Router<Arc<T>>, on_create: T) -> axum::Router
 where
     T: Send + Sync + 'static + Fn(CreateMatch) -> F,
     F: Send + Sync + 'static + Future<Output = MatchCreated>,
