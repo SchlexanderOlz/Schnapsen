@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_URL: &str = "0.0.0.0:5000";
+const DEFAULT_URL: &str = "0.0.0.0:5050";
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct CreateMatch {

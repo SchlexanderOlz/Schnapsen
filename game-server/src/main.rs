@@ -1,28 +1,51 @@
 use listener::{MatchCreated, ModeServerMatchCreated};
+use serde::Serialize;
 
 mod listener;
 mod games;
 
 
-const SERVER_IP: &str = "127.0.0.1";
+const SERVER_IP: &str = "schnapsen-duo-server";
 
-#[derive(Debug)]
-struct AuthError;
-impl std::fmt::Display for AuthError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AuthError")
-    }
+#[derive(Serialize)]
+pub struct GameServer {
+    pub name: String,
+    pub modes: Vec<GameMode>,
+    pub server: String,
+    pub token: String, // Token to authorize as the main-server at this game-server
 }
-impl std::error::Error for AuthError {}
+
+#[derive(Serialize)]
+pub struct GameMode {
+    pub name: String,
+    pub player_count: u32,
+    pub computer_lobby: bool,
+}
 
 
-fn main() {
+#[tokio::main]
+async fn main() {
     tokio::task::spawn(listener::listen(on_new_match));
+
+    let server_info = GameServer {
+        name: "Schnapsen".to_string(),
+        modes: vec![
+            GameMode {
+                name: "Duo".to_string(),
+                player_count: 2,
+                computer_lobby: false,
+            }
+        ],
+        server: "http://game-server:6000".to_string(),
+        token: "token".to_string(),
+    };
+    let client = reqwest::Client::new();
+    client.post("http://games-agent:4000/register").json(&server_info).send().await.unwrap();
 }
 
 async fn on_new_match(new_match: listener::CreateMatch) -> MatchCreated {
     let client = reqwest::Client::new();
-    let response: ModeServerMatchCreated = client.post(format!("http://{}:{}", SERVER_IP, 5000)) // TODO: Get the actuall port of the Mode-Server from some in-memory store
+    let response: ModeServerMatchCreated = client.post(format!("http://{}:{}", SERVER_IP, 6000)) // TODO: Get the actuall port of the Mode-Server from some in-memory store
         .json(&new_match)
         .send()
         .await
@@ -33,6 +56,6 @@ async fn on_new_match(new_match: listener::CreateMatch) -> MatchCreated {
     MatchCreated {
         player_write: response.player_write,
         read: response.read,
-        url: format!("{}:{}", SERVER_IP, 5000)
+        url: format!("{}:{}", SERVER_IP, 6000)
     }
 }

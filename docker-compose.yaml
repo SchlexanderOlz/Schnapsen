@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  game-server:
+    build:
+      context: ./game-server
+    image: cloudolife/col-rust-docker
+    container_name: game-server-schnapsen
+    command: cargo run
+    ports:
+    - "5050:5050"
+    restart: on-failure
+    volumes:
+      - "./game-server:/usr/game-server"
+
+  schnapsen-duo-server:
+    build:
+      context: ./game-server
+    image: cloudolife/col-rust-docker
+    container_name: schnapsen-duo-server
+    command: cargo run
+    ports:
+    - "6000:6000"
+    restart: on-failure
+    volumes:
+      - "./schnapsen-duo-server:/usr/schnapsen-duo-server"
+      - "./schnapsen-rs:/usr/schnapsen-rs"
