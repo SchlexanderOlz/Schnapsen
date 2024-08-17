@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use listener::MatchCreated;
 use axum;
+use schnapsen_rs::SchnapsenDuo;
 use socketioxide::extract::{Data, SocketRef};
 use tracing::info;
 use tracing_subscriber::FmtSubscriber;
@@ -25,9 +26,11 @@ async fn main() {
     let router = axum::Router::new().layer(layer);
 
     let on_create = move |new_match: listener::CreateMatch| {
+        let player_ids = vec!["write0".to_string(), "write1".to_string()];
+
         info!("Creating new match: {:?}", new_match);
         let io = io.clone();
-        let instance = Arc::new(Mutex::new(()));
+        let instance = Arc::new(Mutex::new(SchnapsenDuo::new(player_ids.as_slice().try_into().unwrap())));
 
         async move {
             // TODO: Create the duo schnapsen game instance
@@ -36,12 +39,16 @@ async fn main() {
 
             let instance_clone = instance.clone();
             io.ns(format!("/{read}"), move |socket: SocketRef| {
-                let player = performer::Player { write: format!("write") };
+                let player_id: String = "write1".to_string(); // TODO: Get the player ID from the socket 
 
-                let translator = translator::SchnapsenDuoTranslator::listen(socket);
+                let translator = translator::SchnapsenDuoTranslator::listen(socket.clone());
+                let player_id_clone = player_id.clone();
                 translator.on_event(move |action| {
-                    let performer = performer::Performer::new(&player, instance_clone.clone());
-                    performer.perform(action);
+                    let performer = performer::Performer::new(player_id_clone.clone(), instance_clone.clone());
+                    let res = performer.perform(action);
+                    if res.is_err() {
+                        socket.emit("error", res.unwrap_err().to_string()).unwrap();
+                    }
                 });
 
                 // TODO: Set up an event handler in the instance which notifies if the state for player changes. If this socket connect was without a write token, only subscribe to the global state changes in the instance.

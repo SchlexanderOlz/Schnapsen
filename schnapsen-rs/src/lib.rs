@@ -1,9 +1,10 @@
 use core::fmt;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::future::Future;
 use std::ops::Index;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::thread::panicking;
 
 use models::Announcement;
 use models::{Card, Player};
@@ -96,12 +97,10 @@ pub enum SchnapsenDuoPublicEvent {
     ReceiveCard(String),
 }
 
-pub struct SchnapsenDuo<FPub, FPriv, Fut>
-where
-    FPub: Fn(SchnapsenDuoPublicEvent) -> Fut,
-    FPriv: Fn(SchnapsenDuoPrivateEvent) -> Fut,
-    Fut: Future<Output = ()> + Send + Sync + 'static,
-{
+type FPub = Arc<dyn Fn(SchnapsenDuoPublicEvent) -> () + Send + Sync + 'static>;
+type FPriv = Arc<dyn Fn(SchnapsenDuoPrivateEvent) -> () + Send + Sync + 'static>;
+
+pub struct SchnapsenDuo {
     players: [Rc<RefCell<Player>>; 2],
     deck: Vec<Card>,
     active: Option<Rc<RefCell<Player>>>,
@@ -111,12 +110,10 @@ where
     priv_callbacks: HashMap<String, Vec<FPriv>>,
 }
 
-impl<FPub, FPriv, Fut> SchnapsenDuo<FPub, FPriv, Fut>
-where
-    FPub: Fn(SchnapsenDuoPublicEvent) -> Fut,
-    FPriv: Fn(SchnapsenDuoPrivateEvent) -> Fut,
-    Fut: Future<Output = ()> + Send + Sync + 'static,
-{
+unsafe impl Send for SchnapsenDuo {}
+unsafe impl Sync for SchnapsenDuo {}
+
+impl SchnapsenDuo {
     pub fn new(player_ids: &[String; 2]) -> Self {
         let deck = Self::populate_deck();
         let players = [
@@ -148,9 +145,9 @@ where
     }
 
     #[inline]
-    pub fn on_priv_event(&mut self, user_id: String, callback: FPriv) {
+    pub fn on_priv_event(&mut self, player: Rc<RefCell<Player>>, callback: FPriv) {
         self.priv_callbacks
-            .entry(user_id)
+            .entry(player.borrow().id.clone())
             .or_insert_with(Vec::new)
             .push(callback);
     }
@@ -158,6 +155,13 @@ where
     #[inline]
     pub fn on_pub_event(&mut self, callback: FPub) {
         self.pub_callbacks.push(callback);
+    }
+    
+    pub fn get_player(&self, player_id: &str) -> Option<Rc<RefCell<Player>>> {
+        self.players
+            .iter()
+            .find(|player| player.borrow().id == player_id)
+            .cloned()
     }
 
     #[inline]
@@ -173,7 +177,10 @@ where
             .cloned()
     }
 
-    pub fn cutt_deck(&mut self, mut cards_to_take: usize) -> Result<(), PlayerError> {
+    pub fn cutt_deck(&mut self, player: Rc<RefCell<Player>>, mut cards_to_take: usize) -> Result<(), PlayerError> {
+        if Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
+            return Err(PlayerError::CantTakeCardRoundNotFinished);
+        }
         if cards_to_take > self.deck.len() {
             cards_to_take = self.deck.len();
         }
@@ -182,41 +189,44 @@ where
         Ok(())
     }
 
-    pub fn take_top_card_after_trick(&mut self) -> Result<(), PlayerError> {
+    pub fn draw_card_after_trick(&mut self, player: Rc<RefCell<Player>>) -> Result<(), PlayerError> {
+        if !Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
+            return Err(PlayerError::CantTakeCardRoundNotFinished);
+        }
         if !self.stack.is_empty() {
             return Err(PlayerError::CantTakeCardRoundNotFinished);
         }
 
-        if !self.active.as_ref().unwrap().borrow().cards.len() < 5 {
+        if player.borrow().cards.len() < 5 {
             return Err(PlayerError::CantTakeCardRoundNotFinished);
         }
-        self.draw_card()?;
+        self.draw_card(player)?;
         self.swap_to(self.get_non_active_player().unwrap());
         Ok(())
     }
 
-    pub fn draw_card(&mut self) -> Result<(), PlayerError> {
+    pub fn draw_card(&mut self, player: Rc<RefCell<Player>>) -> Result<(), PlayerError> {
         if self.deck.is_empty() {
             return Err(PlayerError::CantTakeCardDeckEmpty);
         }
-        self.active
-            .as_deref()
-            .unwrap()
+        player
             .borrow_mut()
             .cards
             .push(self.deck.pop().unwrap());
+    
+        self.notify_pub(SchnapsenDuoPublicEvent::DeckCardCount(self.deck.len()));
 
         let card = self.deck.pop().unwrap();
         self.notify_priv(
-            self.active.as_ref().unwrap().borrow().id.clone(),
+            player.borrow().id.clone(),
             SchnapsenDuoPrivateEvent::CardAvailabe(card.clone()),
         );
         self.notify_pub(SchnapsenDuoPublicEvent::ReceiveCard(
-            self.active.as_ref().unwrap().borrow().id.clone(),
+            player.borrow().id.clone(),
         ));
-        self.active.as_ref().unwrap().borrow_mut().cards.push(card);
-        self.run_announce_checks();
-        self.run_swap_trump_check();
+        player.borrow_mut().cards.push(card);
+        self.run_announce_checks(player.clone());
+        self.run_swap_trump_check(player);
 
         Ok(())
     }
@@ -233,8 +243,14 @@ where
         if self.deck.is_empty() {
             return Err(PlayerError::CantTakeCardDeckEmpty);
         }
-        let cards = self.deck.drain(..idx);
-        player.borrow_mut().cards.extend(cards);
+
+        for card in self.deck.drain(..idx).collect::<Vec<_>>() {
+            player.borrow_mut().cards.push(card.clone());
+            self.notify_priv(player.borrow().id.clone(), SchnapsenDuoPrivateEvent::CardAvailabe(card));
+            self.notify_pub(SchnapsenDuoPublicEvent::ReceiveCard(player.borrow().id.clone()));
+        }
+
+        self.notify_pub(SchnapsenDuoPublicEvent::DeckCardCount(self.deck.len()));
         Ok(())
     }
 
@@ -298,20 +314,17 @@ where
         Ok(())
     }
 
-    pub fn play_card(&mut self, card: Card) -> Result<(), PlayerError> {
-        if self.active.is_none() {
+    pub fn play_card(&mut self, player: Rc<RefCell<Player>>, card: Card) -> Result<(), PlayerError> {
+        if self.active.is_none() || !Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return Err(PlayerError::PlayerNotActive);
         }
 
-        if !self.active.as_ref().unwrap().borrow().cards.contains(&card) {
+        if !player.borrow().cards.contains(&card) {
             return Err(PlayerError::CantPlayCard(card));
         }
 
         if card.suit != self.trump.as_ref().unwrap().suit {
-            if self
-                .active
-                .as_ref()
-                .unwrap()
+            if  player
                 .borrow()
                 .cards
                 .iter()
@@ -321,16 +334,14 @@ where
             }
         }
 
-        self.active
-            .as_ref()
-            .unwrap()
+        player
             .borrow_mut()
             .cards
             .retain(|c| c != &card);
 
         self.notify_pub(SchnapsenDuoPublicEvent::PlayCard(card.clone()));
         self.notify_priv(
-            self.active.as_ref().unwrap().borrow().id.clone(),
+            player.borrow().id.clone(),
             SchnapsenDuoPrivateEvent::CardUnavailabe(card.clone()),
         );
         self.stack.push(card);
@@ -344,10 +355,13 @@ where
         Ok(())
     }
 
-    pub fn swap_trump(&mut self) -> Result<(), PlayerError> {
-        if let Some(pos) = self.can_swap_trump() {
+    pub fn swap_trump(&mut self, player: Rc<RefCell<Player>>, card: Card) -> Result<(), PlayerError> {
+        if let Some(pos) = self.can_swap_trump(player.clone()) {
             {
-                let mut borrow = self.active.as_ref().unwrap().borrow_mut();
+                if player.borrow().cards[pos] != card {
+                    return Err(PlayerError::CantSwapTrump);
+                }
+                let mut borrow = player.borrow_mut();
                 let other = borrow.cards.remove(pos);
 
                 let trump = self.trump.take().unwrap();
@@ -373,8 +387,8 @@ where
         Err(PlayerError::CantSwapTrump)
     }
 
-    pub fn announce_40(&mut self) -> Result<(), PlayerError> {
-        let cards_to_announce = self.can_announce_40();
+    pub fn announce_40(&mut self, player: Rc<RefCell<Player>>) -> Result<(), PlayerError> {
+        let cards_to_announce = self.can_announce_40(player);
         if cards_to_announce.is_none() {
             return Err(PlayerError::CantPlay40);
         }
@@ -390,8 +404,8 @@ where
         Ok(())
     }
 
-    pub fn announce_20(&mut self) -> Result<(), PlayerError> {
-        let announce = self.can_announce_20();
+    pub fn announce_20(&mut self, player: Rc<RefCell<Player>>) -> Result<(), PlayerError> {
+        let announce = self.can_announce_20(player);
         if announce.is_none() {
             return Err(PlayerError::CantPlay20);
         }
@@ -410,8 +424,8 @@ where
 
     #[inline]
     // TODO: This function returns a fucking value because of some stupid fucking borrowing rules your mum invented. Change this to a fucking stupid refernce as soon as possible
-    fn can_announce_20(&self) -> Option<[Card; 2]> {
-        if self.active.is_none() {
+    fn can_announce_20(&self, player: Rc<RefCell<Player>>) -> Option<[Card; 2]> {
+        if self.active.is_none() || !Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return None;
         }
         let player = self.active.as_deref().unwrap();
@@ -430,8 +444,8 @@ where
         })
     }
 
-    fn can_announce_40(&self) -> Option<[Card; 2]> {
-        let cards_to_announce = self.can_announce_20();
+    fn can_announce_40(&self, player: Rc<RefCell<Player>>) -> Option<[Card; 2]> {
+        let cards_to_announce = self.can_announce_20(player.clone());
         if cards_to_announce.is_none() {
             return None;
         }
@@ -462,8 +476,9 @@ where
 
     fn notify_pub(&self, event: SchnapsenDuoPublicEvent) -> Vec<tokio::task::JoinHandle<()>> {
         let mut handles = Vec::new();
-        for callback in self.pub_callbacks.iter() {
-            handles.push(tokio::task::spawn(callback(event.clone())));
+        for callback in self.pub_callbacks.iter().cloned() {
+            let clone = event.clone();
+            handles.push(tokio::task::spawn(async move { callback(clone) }));
         }
         handles
     }
@@ -474,17 +489,18 @@ where
         event: SchnapsenDuoPrivateEvent,
     ) -> Vec<tokio::task::JoinHandle<()>> {
         let mut handles = Vec::new();
-        if let Some(callbacks) = self.priv_callbacks.get(&user_id) {
-            for callback in callbacks.iter() {
-                handles.push(tokio::task::spawn(callback(event.clone())));
+        if let Some(callbacks) = self.priv_callbacks.get(&user_id).cloned() {
+            for callback in callbacks {
+                let clone = event.clone();
+                handles.push(tokio::task::spawn(async move { callback(clone) }));
             }
         }
         handles
     }
 
-    fn run_announce_checks(&self) {
-        let id = self.active.as_ref().unwrap().borrow().id.clone();
-        if let Some(announcement) = self.can_announce_20() {
+    fn run_announce_checks(&self, player: Rc<RefCell<Player>>) {
+        let id = player.borrow().id.clone();
+        if let Some(announcement) = self.can_announce_20(player.clone()) {
             let announcement = Announcement {
                 cards: announcement,
                 announcement_type: models::AnnounceType::Twenty,
@@ -495,7 +511,7 @@ where
             );
         }
 
-        if let Some(announcement) = self.can_announce_40() {
+        if let Some(announcement) = self.can_announce_40(player) {
             let announcement = Announcement {
                 cards: announcement,
                 announcement_type: models::AnnounceType::Forty,
@@ -504,10 +520,10 @@ where
         }
     }
 
-    fn run_swap_trump_check(&self) {
-        if self.can_swap_trump().is_some() {
+    fn run_swap_trump_check(&self, player: Rc<RefCell<Player>>) {
+        if self.can_swap_trump(player.clone()).is_some() {
             self.notify_priv(
-                self.active.as_ref().unwrap().borrow().id.clone(),
+                player.borrow().id.clone(),
                 SchnapsenDuoPrivateEvent::TrumpChange(self.trump.as_ref().unwrap().clone()),
             );
         }
@@ -639,8 +655,8 @@ where
         player.as_ref().borrow_mut().cards.push(card);
     }
 
-    fn can_swap_trump(&self) -> Option<usize> {
-        if self.active.is_none() {
+    fn can_swap_trump(&self, player: Rc<RefCell<Player>>) -> Option<usize> {
+        if self.active.is_none() || !Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return None;
         }
 
