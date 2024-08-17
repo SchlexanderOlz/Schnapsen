@@ -1,12 +1,16 @@
 use core::fmt;
-use std::borrow::BorrowMut;
-use std::cell::Ref;
 use std::cell::RefCell;
-use std::ops::Deref;
+use std::collections::HashMap;
+use std::future::Future;
+use std::ops::Index;
+use std::rc::Rc;
 
+use models::Announcement;
 use models::{Card, Player};
 use rand::prelude::*;
 use rand::thread_rng;
+use serde::Deserialize;
+use serde::Serialize;
 
 pub mod models;
 
@@ -14,9 +18,16 @@ pub mod models;
 pub enum PlayerError {
     CantPlay40,
     CantPlay20,
-    CantTakeCardStackEmpty,
+    CantTakeCardDeckEmpty,
     CantPlayCard(Card),
     PlayerNotActive,
+    CardNotTrump,
+    CantTakeCardRoundNotFinished,
+    CantDistributeCardsNoPlayerActive,
+    CantTakeAllDeckCards,
+    NotAllPlayersHaveTakenCards,
+    CantSetActivePlayer,
+    CantSwapTrump,
 }
 
 impl PlayerError {
@@ -24,9 +35,28 @@ impl PlayerError {
         match self {
             PlayerError::CantPlay40 => "Player can't play 40 right now",
             PlayerError::CantPlay20 => "Player can't play 20 right now",
-            PlayerError::CantTakeCardStackEmpty => "Player can't take card from empty stack",
+            PlayerError::CantTakeCardDeckEmpty => "Player can't take card from empty card deck",
             PlayerError::CantPlayCard(_) => "Player can't play this card",
             PlayerError::PlayerNotActive => "Player is not active",
+            PlayerError::CardNotTrump => "Player can't play card because it's not trump",
+            PlayerError::CantTakeCardRoundNotFinished => {
+                "Player can't take card because round is not finished"
+            },
+            PlayerError::CantDistributeCardsNoPlayerActive => {
+                "Can't distribute cards because no player is active"
+            },
+            PlayerError::CantTakeAllDeckCards => {
+                "Can't take so much deck cards because there are not enough cards or the opponent would have any cards left to pick"
+            },
+            PlayerError::NotAllPlayersHaveTakenCards => {
+                "Not all players have taken cards"
+            },
+            PlayerError::CantSetActivePlayer => {
+                "Can't set active player because some player is already active"
+            },
+            PlayerError::CantSwapTrump => {
+                "Can't swap trump because player has no jack of trump in his hand"
+            }
         }
     }
 }
@@ -38,50 +68,109 @@ impl fmt::Display for PlayerError {
 }
 impl std::error::Error for PlayerError {}
 
-pub enum SchnapsenDuoActions {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SchnapsenDuoPrivateEvent {
     // TODO: Continue here with finding all events which happen in the game. Then add handlers
+    CanAnnounce(Announcement),
+    CardAvailabe(Card),
+    CardUnavailabe(Card),
+    Trick([Card; 2]),
+    Result(u8),
+    TrumpChange(Card),
+    Active,
+    Inactive,
 }
 
-pub struct SchnapsenDuo<'a> {
-    players: [RefCell<Player>; 2],
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SchnapsenDuoPublicEvent {
+    PlayCard(Card),
+    Trick(String, [Card; 2]),
+    Announce(Announcement),
+    Result(String, u8),
+    FinalResult(String),
+    CloseTalon,
+    TrumpChange(Card),
+    Active(String),
+    Inactive(String),
+    DeckCardCount(usize),
+    ReceiveCard(String),
+}
+
+pub struct SchnapsenDuo<FPub, FPriv, Fut>
+where
+    FPub: Fn(SchnapsenDuoPublicEvent) -> Fut,
+    FPriv: Fn(SchnapsenDuoPrivateEvent) -> Fut,
+    Fut: Future<Output = ()> + Send + Sync + 'static,
+{
+    players: [Rc<RefCell<Player>>; 2],
     deck: Vec<Card>,
-    active: Option<&'a RefCell<Player>>,
-    trump: Option<models::CardSuit>,
+    active: Option<Rc<RefCell<Player>>>,
+    trump: Option<models::Card>,
     stack: Vec<Card>,
+    pub_callbacks: Vec<FPub>,
+    priv_callbacks: HashMap<String, Vec<FPriv>>,
 }
 
-impl<'a> SchnapsenDuo<'a> {
-    pub fn new(player_ids: &[String; 2]) -> SchnapsenDuo {
-        let deck = SchnapsenDuo::populate_deck();
+impl<FPub, FPriv, Fut> SchnapsenDuo<FPub, FPriv, Fut>
+where
+    FPub: Fn(SchnapsenDuoPublicEvent) -> Fut,
+    FPriv: Fn(SchnapsenDuoPrivateEvent) -> Fut,
+    Fut: Future<Output = ()> + Send + Sync + 'static,
+{
+    pub fn new(player_ids: &[String; 2]) -> Self {
+        let deck = Self::populate_deck();
         let players = [
-            RefCell::new(Player {
+            Rc::new(RefCell::new(Player {
                 id: player_ids[0].clone(),
                 cards: Vec::new(),
                 tricks: Vec::new(),
                 announcement: None,
                 points: 0,
-            }),
-            RefCell::new(Player {
+            })),
+            Rc::new(RefCell::new(Player {
                 id: player_ids[1].clone(),
                 cards: Vec::new(),
                 tricks: Vec::new(),
                 announcement: None,
                 points: 0,
-            }),
+            })),
         ];
 
-        SchnapsenDuo {
+        Self {
             active: None,
             players,
             deck: deck.into(),
             trump: None,
             stack: Vec::new(),
+            pub_callbacks: Vec::new(),
+            priv_callbacks: HashMap::new(),
         }
     }
 
     #[inline]
-    pub fn get_active_player(&'a self) -> Option<&RefCell<Player>> {
-        self.active
+    pub fn on_priv_event(&mut self, user_id: String, callback: FPriv) {
+        self.priv_callbacks
+            .entry(user_id)
+            .or_insert_with(Vec::new)
+            .push(callback);
+    }
+
+    #[inline]
+    pub fn on_pub_event(&mut self, callback: FPub) {
+        self.pub_callbacks.push(callback);
+    }
+
+    #[inline]
+    pub fn get_active_player(&self) -> Option<Rc<RefCell<Player>>> {
+        self.active.clone()
+    }
+
+    #[inline]
+    pub fn get_non_active_player(&self) -> Option<Rc<RefCell<Player>>> {
+        self.players
+            .iter()
+            .find(|player| Rc::ptr_eq(*player, self.active.as_ref().unwrap()))
+            .cloned()
     }
 
     pub fn cutt_deck(&mut self, mut cards_to_take: usize) -> Result<(), PlayerError> {
@@ -93,133 +182,211 @@ impl<'a> SchnapsenDuo<'a> {
         Ok(())
     }
 
-    pub fn take_top_card(&mut self) -> Result<Card, PlayerError> {
+    pub fn take_top_card_after_trick(&mut self) -> Result<(), PlayerError> {
+        if !self.stack.is_empty() {
+            return Err(PlayerError::CantTakeCardRoundNotFinished);
+        }
+
+        if !self.active.as_ref().unwrap().borrow().cards.len() < 5 {
+            return Err(PlayerError::CantTakeCardRoundNotFinished);
+        }
+        self.draw_card()?;
+        self.swap_to(self.get_non_active_player().unwrap());
+        Ok(())
+    }
+
+    pub fn draw_card(&mut self) -> Result<(), PlayerError> {
         if self.deck.is_empty() {
-            return Err(PlayerError::CantTakeCardStackEmpty);
+            return Err(PlayerError::CantTakeCardDeckEmpty);
         }
         self.active
+            .as_deref()
             .unwrap()
             .borrow_mut()
             .cards
             .push(self.deck.pop().unwrap());
-        Ok(self.deck.pop().unwrap())
+
+        let card = self.deck.pop().unwrap();
+        self.notify_priv(
+            self.active.as_ref().unwrap().borrow().id.clone(),
+            SchnapsenDuoPrivateEvent::CardAvailabe(card.clone()),
+        );
+        self.notify_pub(SchnapsenDuoPublicEvent::ReceiveCard(
+            self.active.as_ref().unwrap().borrow().id.clone(),
+        ));
+        self.active.as_ref().unwrap().borrow_mut().cards.push(card);
+        self.run_announce_checks();
+        self.run_swap_trump_check();
+
+        Ok(())
     }
 
     #[inline]
-    pub fn get_player_with_greates_card(&'a self) -> Option<&RefCell<Player>> {
-        self.players.iter().max_by_key(|player| {
-            assert!(player.borrow().cards.len() == 1);
-            player.borrow().cards[0].value.clone() as u8
-        })
+    pub fn take_cards_til(
+        &mut self,
+        player: Rc<RefCell<Player>>,
+        idx: usize,
+    ) -> Result<(), PlayerError> {
+        if idx >= self.deck.len() - 1 {
+            return Err(PlayerError::CantTakeAllDeckCards);
+        }
+        if self.deck.is_empty() {
+            return Err(PlayerError::CantTakeCardDeckEmpty);
+        }
+        let cards = self.deck.drain(..idx);
+        player.borrow_mut().cards.extend(cards);
+        Ok(())
     }
 
     #[inline]
-    pub fn set_start_player(&'a mut self, player: &'a Player) {
-        self.active = self
+    pub fn get_player_with_greatest_card(&self) -> Result<Rc<RefCell<Player>>, PlayerError> {
+        if self
             .players
             .iter()
-            .find(|p| std::ptr::eq(p.borrow().deref(), player));
+            .any(|player| player.borrow().cards.is_empty())
+        {
+            return Err(PlayerError::NotAllPlayersHaveTakenCards);
+        }
+        Ok(self
+            .players
+            .iter()
+            .max_by_key(|player| player.borrow().cards.last().unwrap().value.clone() as u8)
+            .unwrap()
+            .clone())
+    }
+
+    pub fn recreate_deck(&mut self) {
+        self.deck = Self::populate_deck().into();
+        self.players.iter().for_each(|player| {
+            player.as_ref().borrow_mut().reset();
+        });
+    }
+
+    pub fn distribute_cards(&mut self) -> Result<(), PlayerError> {
+        if self.active.is_none() {
+            return Err(PlayerError::CantDistributeCardsNoPlayerActive);
+        }
+        let mut player_order: Vec<Rc<RefCell<Player>>> = self.players.iter().cloned().collect();
+
+        if !Rc::ptr_eq(self.players.index(0), &self.active.clone().unwrap()) {
+            player_order = self.players.iter().cloned().rev().collect();
+        }
+
+        for player in player_order.clone() {
+            for _ in 0..3 {
+                self.do_cards(player.clone());
+            }
+        }
+        let trump = self.deck.pop().unwrap();
+        self.notify_pub(SchnapsenDuoPublicEvent::TrumpChange(trump.clone()));
+        let _ = self.trump.insert(trump);
+
+        for player in player_order {
+            for _ in 0..2 {
+                self.do_cards(player.clone());
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub fn set_active_player(&mut self, player: Rc<RefCell<Player>>) -> Result<(), PlayerError> {
+        if self.active.is_some() {
+            return Err(PlayerError::CantSetActivePlayer);
+        }
+        self.swap_to(player);
+        Ok(())
     }
 
     pub fn play_card(&mut self, card: Card) -> Result<(), PlayerError> {
         if self.active.is_none() {
             return Err(PlayerError::PlayerNotActive);
         }
-        let active = self.active.unwrap();
 
-        if !active.borrow().cards.contains(&card) {
+        if !self.active.as_ref().unwrap().borrow().cards.contains(&card) {
             return Err(PlayerError::CantPlayCard(card));
         }
 
-        active.borrow_mut().cards.retain(|c| c != &card);
-        self.stack.push(card);
-
-        let enemy = self
-            .players
-            .iter()
-            .find(|p| !std::ptr::eq(p.borrow().deref(), active.borrow().deref()))
-            .unwrap();
-        if self.stack.len() == 2 {
-            if self.stack.last().unwrap().suit != self.stack.first().unwrap().suit {
-                enemy
-                    .borrow_mut()
-                    .tricks
-                    .push((self.stack.pop().unwrap(), self.stack.pop().unwrap()));
-            } else if self.stack.last().unwrap().value.clone() as u8
-                > self.stack.first().unwrap().value.clone() as u8
-            {
-                active
-                    .borrow_mut()
-                    .tricks
-                    .push((self.stack.pop().unwrap(), self.stack.pop().unwrap()));
-            } else {
-                active
-                    .borrow_mut()
-                    .tricks
-                    .push((self.stack.pop().unwrap(), self.stack.pop().unwrap()));
-            }
-
-            let points = self
-                .players
+        if card.suit != self.trump.as_ref().unwrap().suit {
+            if self
+                .active
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .cards
                 .iter()
-                .map(|player| {
-                    player
-                        .borrow()
-                        .cards
-                        .iter()
-                        .fold(0, |acc, card| acc + card.value.clone() as u8)
-                })
-                .zip(self.players.iter());
-
-            let (max_points, winner) = points
-                .clone()
-                .max_by_key(|(mut points, player)| {
-                    if points > 0 {
-                        if let Some(announcement) = &player.borrow().announcement {
-                            points += announcement.announcement_type.clone() as u8;
-                        }
-                    }
-                    points
-                })
-                .unwrap();
-
-            let (min_points, loser) = points.min_by_key(|(points, _)| *points).unwrap();
-
-            if max_points < 66 {
-                return Ok(());
+                .any(|c| c.suit == self.trump.as_ref().unwrap().suit)
+            {
+                return Err(PlayerError::CardNotTrump);
             }
-            // TODO: Someone won the game here
-
-            if min_points == 0 {
-                winner.borrow_mut().points += 3;
-            } else if min_points >= 33 {
-                winner.borrow_mut().points += 2;
-            } else {
-                winner.borrow_mut().points += 1;
-            }
-            winner.borrow_mut().reset();
-            loser.borrow_mut().reset();
         }
 
+        self.active
+            .as_ref()
+            .unwrap()
+            .borrow_mut()
+            .cards
+            .retain(|c| c != &card);
+
+        self.notify_pub(SchnapsenDuoPublicEvent::PlayCard(card.clone()));
+        self.notify_priv(
+            self.active.as_ref().unwrap().borrow().id.clone(),
+            SchnapsenDuoPrivateEvent::CardUnavailabe(card.clone()),
+        );
+        self.stack.push(card);
+
+        if self.stack.len() == 2 {
+            self.handle_trick()?;
+        } else {
+            self.swap_to(self.get_non_active_player().unwrap());
+        }
+        self.run_after_move_checks();
         Ok(())
     }
 
+    pub fn swap_trump(&mut self) -> Result<(), PlayerError> {
+        if let Some(pos) = self.can_swap_trump() {
+            {
+                let mut borrow = self.active.as_ref().unwrap().borrow_mut();
+                let other = borrow.cards.remove(pos);
+
+                let trump = self.trump.take().unwrap();
+
+                borrow.cards.push(trump.clone());
+                self.trump = Some(other.clone());
+
+                self.notify_priv(
+                    borrow.id.clone(),
+                    SchnapsenDuoPrivateEvent::CardAvailabe(trump),
+                );
+                self.notify_priv(
+                    borrow.id.clone(),
+                    SchnapsenDuoPrivateEvent::CardUnavailabe(other),
+                );
+            }
+
+            self.notify_pub(SchnapsenDuoPublicEvent::TrumpChange(
+                self.trump.as_ref().unwrap().clone(),
+            ));
+            return Ok(());
+        }
+        Err(PlayerError::CantSwapTrump)
+    }
+
     pub fn announce_40(&mut self) -> Result<(), PlayerError> {
-        let cards_to_announce = self.can_announce_20();
+        let cards_to_announce = self.can_announce_40();
         if cards_to_announce.is_none() {
             return Err(PlayerError::CantPlay40);
         }
-        let cards_to_announce = cards_to_announce.unwrap();
 
-        if cards_to_announce.first().unwrap().suit != self.trump.as_ref().unwrap().clone() {
-            return Err(PlayerError::CantPlay40);
-        }
-
-        self.active.unwrap().borrow_mut().announcement = Some(models::Announcement {
-            cards: cards_to_announce,
+        let announcement = models::Announcement {
+            cards: cards_to_announce.unwrap(),
             announcement_type: models::AnnounceType::Forty,
-        });
+        };
 
+        self.active.as_deref().unwrap().borrow_mut().announcement = Some(announcement.clone());
+        self.notify_pub(SchnapsenDuoPublicEvent::Announce(announcement.clone()));
+        self.run_after_move_checks();
         Ok(())
     }
 
@@ -230,20 +397,24 @@ impl<'a> SchnapsenDuo<'a> {
         }
         let announce = announce.unwrap();
 
-        self.active.unwrap().borrow_mut().announcement = Some(models::Announcement {
+        let announcement = models::Announcement {
             cards: announce,
-            announcement_type: models::AnnounceType::Twenty,
-        });
+            announcement_type: models::AnnounceType::Forty,
+        };
+
+        self.active.as_deref().unwrap().borrow_mut().announcement = Some(announcement.clone());
+        self.notify_pub(SchnapsenDuoPublicEvent::Announce(announcement.clone()));
+        self.run_after_move_checks();
         Ok(())
     }
 
     #[inline]
     // TODO: This function returns a fucking value because of some stupid fucking borrowing rules your mum invented. Change this to a fucking stupid refernce as soon as possible
-    fn can_announce_20(&'a self) -> Option<[Card; 2]> {
+    fn can_announce_20(&self) -> Option<[Card; 2]> {
         if self.active.is_none() {
             return None;
         }
-        let player = self.active.unwrap();
+        let player = self.active.as_deref().unwrap();
 
         (0..4).find_map(move |suit: u8| {
             let borrow = player.borrow();
@@ -257,6 +428,19 @@ impl<'a> SchnapsenDuo<'a> {
                 None
             }
         })
+    }
+
+    fn can_announce_40(&self) -> Option<[Card; 2]> {
+        let cards_to_announce = self.can_announce_20();
+        if cards_to_announce.is_none() {
+            return None;
+        }
+        let cards_to_announce = cards_to_announce.unwrap();
+
+        if cards_to_announce.first().unwrap().suit != self.trump.as_ref().unwrap().suit {
+            return None;
+        }
+        Some(cards_to_announce)
     }
 
     fn populate_deck() -> [Card; 20] {
@@ -274,5 +458,201 @@ impl<'a> SchnapsenDuo<'a> {
         deck.shuffle(&mut rng);
         deck.try_into()
             .expect("Programming error. Populated deck is not of length 20")
+    }
+
+    fn notify_pub(&self, event: SchnapsenDuoPublicEvent) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut handles = Vec::new();
+        for callback in self.pub_callbacks.iter() {
+            handles.push(tokio::task::spawn(callback(event.clone())));
+        }
+        handles
+    }
+
+    fn notify_priv(
+        &self,
+        user_id: String,
+        event: SchnapsenDuoPrivateEvent,
+    ) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut handles = Vec::new();
+        if let Some(callbacks) = self.priv_callbacks.get(&user_id) {
+            for callback in callbacks.iter() {
+                handles.push(tokio::task::spawn(callback(event.clone())));
+            }
+        }
+        handles
+    }
+
+    fn run_announce_checks(&self) {
+        let id = self.active.as_ref().unwrap().borrow().id.clone();
+        if let Some(announcement) = self.can_announce_20() {
+            let announcement = Announcement {
+                cards: announcement,
+                announcement_type: models::AnnounceType::Twenty,
+            };
+            self.notify_priv(
+                id.clone(),
+                SchnapsenDuoPrivateEvent::CanAnnounce(announcement),
+            );
+        }
+
+        if let Some(announcement) = self.can_announce_40() {
+            let announcement = Announcement {
+                cards: announcement,
+                announcement_type: models::AnnounceType::Forty,
+            };
+            self.notify_priv(id, SchnapsenDuoPrivateEvent::CanAnnounce(announcement));
+        }
+    }
+
+    fn run_swap_trump_check(&self) {
+        if self.can_swap_trump().is_some() {
+            self.notify_priv(
+                self.active.as_ref().unwrap().borrow().id.clone(),
+                SchnapsenDuoPrivateEvent::TrumpChange(self.trump.as_ref().unwrap().clone()),
+            );
+        }
+    }
+
+    fn run_after_move_checks(&mut self) {}
+
+    fn swap_to(&mut self, player: Rc<RefCell<Player>>) {
+        if Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
+            return;
+        }
+        let user_id = self.active.as_deref().unwrap().borrow().id.clone();
+        self.notify_pub(SchnapsenDuoPublicEvent::Inactive(user_id.clone()));
+        self.notify_priv(user_id, SchnapsenDuoPrivateEvent::Inactive);
+
+        let _ = self.active.insert(player);
+
+        let user_id = self.active.as_deref().unwrap().borrow().id.clone();
+        self.notify_pub(SchnapsenDuoPublicEvent::Active(user_id.clone()));
+        self.notify_priv(user_id, SchnapsenDuoPrivateEvent::Active);
+    }
+
+    fn handle_trick(&mut self) -> Result<(), PlayerError> {
+        let won = {
+            let enemy = self.get_non_active_player().unwrap();
+
+            let active_is_trump =
+                self.stack.first().unwrap().suit == self.trump.as_ref().unwrap().suit;
+            let enemy_is_trump =
+                self.stack.last().unwrap().suit == self.trump.as_ref().unwrap().suit;
+
+            if !active_is_trump && enemy_is_trump {
+                enemy.clone()
+            } else if active_is_trump && !enemy_is_trump {
+                self.active.clone().unwrap()
+            } else if self.stack.last().unwrap().value.clone() as u8
+                > self.stack.first().unwrap().value.clone() as u8
+            {
+                self.active.clone().unwrap()
+            } else {
+                enemy.clone()
+            }
+        };
+
+        self.swap_to(won.clone());
+        self.notify_pub(SchnapsenDuoPublicEvent::Trick(
+            won.as_ref().borrow().id.clone(),
+            self.stack.clone().try_into().unwrap(),
+        ));
+        self.notify_priv(
+            won.borrow().id.clone(),
+            SchnapsenDuoPrivateEvent::Trick(self.stack.clone().try_into().unwrap()),
+        );
+
+        won.as_ref()
+            .borrow_mut()
+            .tricks
+            .push((self.stack.pop().unwrap(), self.stack.pop().unwrap()));
+
+        let points = self
+            .players
+            .iter()
+            .map(|player| {
+                player
+                    .borrow()
+                    .cards
+                    .iter()
+                    .fold(0, |acc, card| acc + card.value.clone() as u8)
+            })
+            .zip(self.players.iter());
+
+        let (max_points, winner) = points
+            .clone()
+            .max_by_key(|(mut points, player)| {
+                if points > 0 {
+                    if let Some(announcement) = &player.borrow().announcement {
+                        points += announcement.announcement_type.clone() as u8;
+                    }
+                }
+                points
+            })
+            .unwrap();
+
+        let (min_points, loser) = points.min_by_key(|(points, _)| *points).unwrap();
+
+        if max_points < 66 {
+            return Ok(());
+        }
+
+        let points;
+        if min_points == 0 {
+            points = 3;
+        } else if min_points >= 33 {
+            points = 2;
+        } else {
+            points = 1;
+        }
+        winner.as_ref().borrow_mut().points += points;
+        self.notify_pub(SchnapsenDuoPublicEvent::Result(
+            winner.borrow().id.clone(),
+            points,
+        ));
+
+        winner.as_ref().borrow_mut().reset();
+        loser.as_ref().borrow_mut().reset();
+
+        let total_winner = self
+            .players
+            .iter()
+            .find(|player| player.borrow().points >= 7);
+
+        if total_winner.is_some() {
+            self.notify_pub(SchnapsenDuoPublicEvent::FinalResult(
+                total_winner.unwrap().borrow().id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn do_cards(&mut self, player: Rc<RefCell<Player>>) {
+        let card = self.deck.pop().unwrap();
+        self.notify_priv(
+            player.as_ref().borrow().id.clone(),
+            SchnapsenDuoPrivateEvent::CardAvailabe(card.clone()),
+        );
+        self.notify_pub(SchnapsenDuoPublicEvent::ReceiveCard(
+            player.as_ref().borrow().id.clone(),
+        ));
+        player.as_ref().borrow_mut().cards.push(card);
+    }
+
+    fn can_swap_trump(&self) -> Option<usize> {
+        if self.active.is_none() {
+            return None;
+        }
+
+        self.active
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .cards
+            .iter()
+            .position(|card| {
+                card.suit == self.trump.as_ref().unwrap().suit
+                    && card.value == models::CardVal::Jack
+            })
     }
 }

@@ -30,6 +30,7 @@ pub enum CardSuit {
     Spades = 3
 }
 
+#[derive(Clone)]
 pub struct Player {
     pub id: String,
     pub cards: Vec<Card>,
@@ -46,6 +47,7 @@ impl Player {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Announcement {
     pub cards: [Card; 2],
     pub announcement_type: AnnounceType,
