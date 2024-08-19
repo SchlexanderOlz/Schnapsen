@@ -1,4 +1,4 @@
-use std::{cell::RefCell, default};
+use std::{cell::RefCell, default, hash::Hash};
 
 use num_enum::FromPrimitive;
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,12 @@ impl Player {
         self.cards.clear();
         self.tricks.clear();
         self.announcement = None;
+    }
+}
+
+impl Hash for Player {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write(self.id.as_bytes());
     }
 }
 

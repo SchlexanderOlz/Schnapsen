@@ -18,3 +18,5 @@ tracing-subscriber = "0.3.18"
 schnapsen-rs = { path = "../schnapsen-rs" }
 num_enum = "0.7.3"
 thiserror = "1.0.63"
+sh2 = "0.1.0"
+sha2 = "0.10.8"

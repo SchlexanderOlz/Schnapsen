@@ -1,10 +1,10 @@
 use core::fmt;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::ops::Index;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::thread::panicking;
 
 use models::Announcement;
 use models::{Card, Player};
@@ -70,7 +70,7 @@ impl fmt::Display for PlayerError {
 impl std::error::Error for PlayerError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SchnapsenDuoPrivateEvent {
+pub enum PrivateEvent {
     // TODO: Continue here with finding all events which happen in the game. Then add handlers
     CanAnnounce(Announcement),
     CardAvailabe(Card),
@@ -83,7 +83,7 @@ pub enum SchnapsenDuoPrivateEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SchnapsenDuoPublicEvent {
+pub enum PublicEvent {
     PlayCard(Card),
     Trick(String, [Card; 2]),
     Announce(Announcement),
@@ -97,8 +97,8 @@ pub enum SchnapsenDuoPublicEvent {
     ReceiveCard(String),
 }
 
-type FPub = Arc<dyn Fn(SchnapsenDuoPublicEvent) -> () + Send + Sync + 'static>;
-type FPriv = Arc<dyn Fn(SchnapsenDuoPrivateEvent) -> () + Send + Sync + 'static>;
+type FPub = Arc<dyn Fn(PublicEvent) -> () + Send + Sync + 'static>;
+type FPriv = Arc<dyn Fn(PrivateEvent) -> () + Send + Sync + 'static>;
 
 pub struct SchnapsenDuo {
     players: [Rc<RefCell<Player>>; 2],
@@ -112,6 +112,14 @@ pub struct SchnapsenDuo {
 
 unsafe impl Send for SchnapsenDuo {}
 unsafe impl Sync for SchnapsenDuo {}
+
+impl Hash for SchnapsenDuo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.players.iter().for_each(|player| player.borrow().hash(state));
+        let now = chrono::Utc::now();
+        state.write(now.timestamp().to_le_bytes().as_slice().into());
+    }
+}
 
 impl SchnapsenDuo {
     pub fn new(player_ids: &[String; 2]) -> Self {
@@ -145,16 +153,16 @@ impl SchnapsenDuo {
     }
 
     #[inline]
-    pub fn on_priv_event(&mut self, player: Rc<RefCell<Player>>, callback: FPriv) {
+    pub fn on_priv_event(&mut self, player: Rc<RefCell<Player>>, callback: impl Fn(PrivateEvent) -> () + Send + Sync + 'static) {
         self.priv_callbacks
             .entry(player.borrow().id.clone())
             .or_insert_with(Vec::new)
-            .push(callback);
+            .push(Arc::new(callback));
     }
 
     #[inline]
-    pub fn on_pub_event(&mut self, callback: FPub) {
-        self.pub_callbacks.push(callback);
+    pub fn on_pub_event(&mut self, callback: impl Fn(PublicEvent) -> () + Send + Sync + 'static) {
+        self.pub_callbacks.push(Arc::new(callback));
     }
     
     pub fn get_player(&self, player_id: &str) -> Option<Rc<RefCell<Player>>> {
@@ -214,14 +222,14 @@ impl SchnapsenDuo {
             .cards
             .push(self.deck.pop().unwrap());
     
-        self.notify_pub(SchnapsenDuoPublicEvent::DeckCardCount(self.deck.len()));
+        self.notify_pub(PublicEvent::DeckCardCount(self.deck.len()));
 
         let card = self.deck.pop().unwrap();
         self.notify_priv(
             player.borrow().id.clone(),
-            SchnapsenDuoPrivateEvent::CardAvailabe(card.clone()),
+            PrivateEvent::CardAvailabe(card.clone()),
         );
-        self.notify_pub(SchnapsenDuoPublicEvent::ReceiveCard(
+        self.notify_pub(PublicEvent::ReceiveCard(
             player.borrow().id.clone(),
         ));
         player.borrow_mut().cards.push(card);
@@ -246,11 +254,11 @@ impl SchnapsenDuo {
 
         for card in self.deck.drain(..idx).collect::<Vec<_>>() {
             player.borrow_mut().cards.push(card.clone());
-            self.notify_priv(player.borrow().id.clone(), SchnapsenDuoPrivateEvent::CardAvailabe(card));
-            self.notify_pub(SchnapsenDuoPublicEvent::ReceiveCard(player.borrow().id.clone()));
+            self.notify_priv(player.borrow().id.clone(), PrivateEvent::CardAvailabe(card));
+            self.notify_pub(PublicEvent::ReceiveCard(player.borrow().id.clone()));
         }
 
-        self.notify_pub(SchnapsenDuoPublicEvent::DeckCardCount(self.deck.len()));
+        self.notify_pub(PublicEvent::DeckCardCount(self.deck.len()));
         Ok(())
     }
 
@@ -294,7 +302,7 @@ impl SchnapsenDuo {
             }
         }
         let trump = self.deck.pop().unwrap();
-        self.notify_pub(SchnapsenDuoPublicEvent::TrumpChange(trump.clone()));
+        self.notify_pub(PublicEvent::TrumpChange(trump.clone()));
         let _ = self.trump.insert(trump);
 
         for player in player_order {
@@ -339,10 +347,10 @@ impl SchnapsenDuo {
             .cards
             .retain(|c| c != &card);
 
-        self.notify_pub(SchnapsenDuoPublicEvent::PlayCard(card.clone()));
+        self.notify_pub(PublicEvent::PlayCard(card.clone()));
         self.notify_priv(
             player.borrow().id.clone(),
-            SchnapsenDuoPrivateEvent::CardUnavailabe(card.clone()),
+            PrivateEvent::CardUnavailabe(card.clone()),
         );
         self.stack.push(card);
 
@@ -371,15 +379,15 @@ impl SchnapsenDuo {
 
                 self.notify_priv(
                     borrow.id.clone(),
-                    SchnapsenDuoPrivateEvent::CardAvailabe(trump),
+                    PrivateEvent::CardAvailabe(trump),
                 );
                 self.notify_priv(
                     borrow.id.clone(),
-                    SchnapsenDuoPrivateEvent::CardUnavailabe(other),
+                    PrivateEvent::CardUnavailabe(other),
                 );
             }
 
-            self.notify_pub(SchnapsenDuoPublicEvent::TrumpChange(
+            self.notify_pub(PublicEvent::TrumpChange(
                 self.trump.as_ref().unwrap().clone(),
             ));
             return Ok(());
@@ -399,7 +407,7 @@ impl SchnapsenDuo {
         };
 
         self.active.as_deref().unwrap().borrow_mut().announcement = Some(announcement.clone());
-        self.notify_pub(SchnapsenDuoPublicEvent::Announce(announcement.clone()));
+        self.notify_pub(PublicEvent::Announce(announcement.clone()));
         self.run_after_move_checks();
         Ok(())
     }
@@ -417,7 +425,7 @@ impl SchnapsenDuo {
         };
 
         self.active.as_deref().unwrap().borrow_mut().announcement = Some(announcement.clone());
-        self.notify_pub(SchnapsenDuoPublicEvent::Announce(announcement.clone()));
+        self.notify_pub(PublicEvent::Announce(announcement.clone()));
         self.run_after_move_checks();
         Ok(())
     }
@@ -474,7 +482,7 @@ impl SchnapsenDuo {
             .expect("Programming error. Populated deck is not of length 20")
     }
 
-    fn notify_pub(&self, event: SchnapsenDuoPublicEvent) -> Vec<tokio::task::JoinHandle<()>> {
+    fn notify_pub(&self, event: PublicEvent) -> Vec<tokio::task::JoinHandle<()>> {
         let mut handles = Vec::new();
         for callback in self.pub_callbacks.iter().cloned() {
             let clone = event.clone();
@@ -486,7 +494,7 @@ impl SchnapsenDuo {
     fn notify_priv(
         &self,
         user_id: String,
-        event: SchnapsenDuoPrivateEvent,
+        event: PrivateEvent,
     ) -> Vec<tokio::task::JoinHandle<()>> {
         let mut handles = Vec::new();
         if let Some(callbacks) = self.priv_callbacks.get(&user_id).cloned() {
@@ -507,7 +515,7 @@ impl SchnapsenDuo {
             };
             self.notify_priv(
                 id.clone(),
-                SchnapsenDuoPrivateEvent::CanAnnounce(announcement),
+                PrivateEvent::CanAnnounce(announcement),
             );
         }
 
@@ -516,7 +524,7 @@ impl SchnapsenDuo {
                 cards: announcement,
                 announcement_type: models::AnnounceType::Forty,
             };
-            self.notify_priv(id, SchnapsenDuoPrivateEvent::CanAnnounce(announcement));
+            self.notify_priv(id, PrivateEvent::CanAnnounce(announcement));
         }
     }
 
@@ -524,7 +532,7 @@ impl SchnapsenDuo {
         if self.can_swap_trump(player.clone()).is_some() {
             self.notify_priv(
                 player.borrow().id.clone(),
-                SchnapsenDuoPrivateEvent::TrumpChange(self.trump.as_ref().unwrap().clone()),
+                PrivateEvent::TrumpChange(self.trump.as_ref().unwrap().clone()),
             );
         }
     }
@@ -536,14 +544,14 @@ impl SchnapsenDuo {
             return;
         }
         let user_id = self.active.as_deref().unwrap().borrow().id.clone();
-        self.notify_pub(SchnapsenDuoPublicEvent::Inactive(user_id.clone()));
-        self.notify_priv(user_id, SchnapsenDuoPrivateEvent::Inactive);
+        self.notify_pub(PublicEvent::Inactive(user_id.clone()));
+        self.notify_priv(user_id, PrivateEvent::Inactive);
 
         let _ = self.active.insert(player);
 
         let user_id = self.active.as_deref().unwrap().borrow().id.clone();
-        self.notify_pub(SchnapsenDuoPublicEvent::Active(user_id.clone()));
-        self.notify_priv(user_id, SchnapsenDuoPrivateEvent::Active);
+        self.notify_pub(PublicEvent::Active(user_id.clone()));
+        self.notify_priv(user_id, PrivateEvent::Active);
     }
 
     fn handle_trick(&mut self) -> Result<(), PlayerError> {
@@ -569,13 +577,13 @@ impl SchnapsenDuo {
         };
 
         self.swap_to(won.clone());
-        self.notify_pub(SchnapsenDuoPublicEvent::Trick(
+        self.notify_pub(PublicEvent::Trick(
             won.as_ref().borrow().id.clone(),
             self.stack.clone().try_into().unwrap(),
         ));
         self.notify_priv(
             won.borrow().id.clone(),
-            SchnapsenDuoPrivateEvent::Trick(self.stack.clone().try_into().unwrap()),
+            PrivateEvent::Trick(self.stack.clone().try_into().unwrap()),
         );
 
         won.as_ref()
@@ -622,7 +630,7 @@ impl SchnapsenDuo {
             points = 1;
         }
         winner.as_ref().borrow_mut().points += points;
-        self.notify_pub(SchnapsenDuoPublicEvent::Result(
+        self.notify_pub(PublicEvent::Result(
             winner.borrow().id.clone(),
             points,
         ));
@@ -636,7 +644,7 @@ impl SchnapsenDuo {
             .find(|player| player.borrow().points >= 7);
 
         if total_winner.is_some() {
-            self.notify_pub(SchnapsenDuoPublicEvent::FinalResult(
+            self.notify_pub(PublicEvent::FinalResult(
                 total_winner.unwrap().borrow().id.clone(),
             ));
         }
@@ -647,9 +655,9 @@ impl SchnapsenDuo {
         let card = self.deck.pop().unwrap();
         self.notify_priv(
             player.as_ref().borrow().id.clone(),
-            SchnapsenDuoPrivateEvent::CardAvailabe(card.clone()),
+            PrivateEvent::CardAvailabe(card.clone()),
         );
-        self.notify_pub(SchnapsenDuoPublicEvent::ReceiveCard(
+        self.notify_pub(PublicEvent::ReceiveCard(
             player.as_ref().borrow().id.clone(),
         ));
         player.as_ref().borrow_mut().cards.push(card);
