@@ -31,3 +31,4 @@ services:
 networks:
   game-night-network:
     external: true
+    driver: bridge

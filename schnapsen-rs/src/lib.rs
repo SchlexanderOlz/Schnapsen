@@ -70,31 +70,32 @@ impl fmt::Display for PlayerError {
 impl std::error::Error for PlayerError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "event", content = "data")]
 pub enum PrivateEvent {
     // TODO: Continue here with finding all events which happen in the game. Then add handlers
     CanAnnounce(Announcement),
     CardAvailabe(Card),
     CardUnavailabe(Card),
-    Trick([Card; 2]),
-    Result(u8),
-    TrumpChange(Card),
-    Active,
-    Inactive,
+    TrumpChangePossible(Card),
 }
 
+// TODO: Alle user_ids are currently serialized as the write-tokens. This has to be changed. SECURITY RISK
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "event", content = "data")]
 pub enum PublicEvent {
-    PlayCard(Card),
-    Trick(String, [Card; 2]),
+    PlayCard { user_id: String, card: Card },
+    Trick { user_id: String, cards: [Card; 2] },
     Announce(Announcement),
-    Result(String, u8),
+    Result { user_id: String, points: u8 },
     FinalResult(String),
-    CloseTalon,
+    CloseTalon { user_id: String },
     TrumpChange(Card),
-    Active(String),
-    Inactive(String),
+    // TrumpSwap(String, Card)
+    Active { user_id: String },
+    Inactive { user_id: String },
     DeckCardCount(usize),
-    ReceiveCard(String),
+    ReceiveCard { user_id: String },
+    FinishedDistribution,
 }
 
 type FPub = Arc<dyn Fn(PublicEvent) -> () + Send + Sync + 'static>;
@@ -115,7 +116,9 @@ unsafe impl Sync for SchnapsenDuo {}
 
 impl Hash for SchnapsenDuo {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.players.iter().for_each(|player| player.borrow().hash(state));
+        self.players
+            .iter()
+            .for_each(|player| player.borrow().hash(state));
         let now = chrono::Utc::now();
         state.write(now.timestamp().to_le_bytes().as_slice().into());
     }
@@ -153,7 +156,11 @@ impl SchnapsenDuo {
     }
 
     #[inline]
-    pub fn on_priv_event(&mut self, player: Rc<RefCell<Player>>, callback: impl Fn(PrivateEvent) -> () + Send + Sync + 'static) {
+    pub fn on_priv_event(
+        &mut self,
+        player: Rc<RefCell<Player>>,
+        callback: impl Fn(PrivateEvent) -> () + Send + Sync + 'static,
+    ) {
         self.priv_callbacks
             .entry(player.borrow().id.clone())
             .or_insert_with(Vec::new)
@@ -164,7 +171,7 @@ impl SchnapsenDuo {
     pub fn on_pub_event(&mut self, callback: impl Fn(PublicEvent) -> () + Send + Sync + 'static) {
         self.pub_callbacks.push(Arc::new(callback));
     }
-    
+
     pub fn get_player(&self, player_id: &str) -> Option<Rc<RefCell<Player>>> {
         self.players
             .iter()
@@ -181,11 +188,15 @@ impl SchnapsenDuo {
     pub fn get_non_active_player(&self) -> Option<Rc<RefCell<Player>>> {
         self.players
             .iter()
-            .find(|player| Rc::ptr_eq(*player, self.active.as_ref().unwrap()))
+            .find(|player| !Rc::ptr_eq(*player, self.active.as_ref().unwrap()))
             .cloned()
     }
 
-    pub fn cutt_deck(&mut self, player: Rc<RefCell<Player>>, mut cards_to_take: usize) -> Result<(), PlayerError> {
+    pub fn cutt_deck(
+        &mut self,
+        player: Rc<RefCell<Player>>,
+        mut cards_to_take: usize,
+    ) -> Result<(), PlayerError> {
         if Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return Err(PlayerError::CantTakeCardRoundNotFinished);
         }
@@ -197,7 +208,10 @@ impl SchnapsenDuo {
         Ok(())
     }
 
-    pub fn draw_card_after_trick(&mut self, player: Rc<RefCell<Player>>) -> Result<(), PlayerError> {
+    pub fn draw_card_after_trick(
+        &mut self,
+        player: Rc<RefCell<Player>>,
+    ) -> Result<(), PlayerError> {
         if !Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return Err(PlayerError::CantTakeCardRoundNotFinished);
         }
@@ -217,11 +231,8 @@ impl SchnapsenDuo {
         if self.deck.is_empty() {
             return Err(PlayerError::CantTakeCardDeckEmpty);
         }
-        player
-            .borrow_mut()
-            .cards
-            .push(self.deck.pop().unwrap());
-    
+        player.borrow_mut().cards.push(self.deck.pop().unwrap());
+
         self.notify_pub(PublicEvent::DeckCardCount(self.deck.len()));
 
         let card = self.deck.pop().unwrap();
@@ -229,9 +240,9 @@ impl SchnapsenDuo {
             player.borrow().id.clone(),
             PrivateEvent::CardAvailabe(card.clone()),
         );
-        self.notify_pub(PublicEvent::ReceiveCard(
-            player.borrow().id.clone(),
-        ));
+        self.notify_pub(PublicEvent::ReceiveCard {
+            user_id: player.borrow().id.clone(),
+        });
         player.borrow_mut().cards.push(card);
         self.run_announce_checks(player.clone());
         self.run_swap_trump_check(player);
@@ -255,7 +266,9 @@ impl SchnapsenDuo {
         for card in self.deck.drain(..idx).collect::<Vec<_>>() {
             player.borrow_mut().cards.push(card.clone());
             self.notify_priv(player.borrow().id.clone(), PrivateEvent::CardAvailabe(card));
-            self.notify_pub(PublicEvent::ReceiveCard(player.borrow().id.clone()));
+            self.notify_pub(PublicEvent::ReceiveCard {
+                user_id: player.borrow().id.clone(),
+            });
         }
 
         self.notify_pub(PublicEvent::DeckCardCount(self.deck.len()));
@@ -310,6 +323,7 @@ impl SchnapsenDuo {
                 self.do_cards(player.clone());
             }
         }
+        self.notify_pub(PublicEvent::FinishedDistribution);
         Ok(())
     }
 
@@ -318,11 +332,15 @@ impl SchnapsenDuo {
         if self.active.is_some() {
             return Err(PlayerError::CantSetActivePlayer);
         }
-        self.swap_to(player);
+        self.make_active(player);
         Ok(())
     }
 
-    pub fn play_card(&mut self, player: Rc<RefCell<Player>>, card: Card) -> Result<(), PlayerError> {
+    pub fn play_card(
+        &mut self,
+        player: Rc<RefCell<Player>>,
+        card: Card,
+    ) -> Result<(), PlayerError> {
         if self.active.is_none() || !Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return Err(PlayerError::PlayerNotActive);
         }
@@ -332,7 +350,7 @@ impl SchnapsenDuo {
         }
 
         if card.suit != self.trump.as_ref().unwrap().suit {
-            if  player
+            if player
                 .borrow()
                 .cards
                 .iter()
@@ -342,17 +360,17 @@ impl SchnapsenDuo {
             }
         }
 
-        player
-            .borrow_mut()
-            .cards
-            .retain(|c| c != &card);
+        player.borrow_mut().cards.retain(|c| c != &card);
 
-        self.notify_pub(PublicEvent::PlayCard(card.clone()));
+        self.stack.push(card.clone());
+        self.notify_pub(PublicEvent::PlayCard {
+            user_id: player.borrow().id.clone(),
+            card: card.clone(),
+        });
         self.notify_priv(
             player.borrow().id.clone(),
-            PrivateEvent::CardUnavailabe(card.clone()),
+            PrivateEvent::CardUnavailabe(card),
         );
-        self.stack.push(card);
 
         if self.stack.len() == 2 {
             self.handle_trick()?;
@@ -363,7 +381,11 @@ impl SchnapsenDuo {
         Ok(())
     }
 
-    pub fn swap_trump(&mut self, player: Rc<RefCell<Player>>, card: Card) -> Result<(), PlayerError> {
+    pub fn swap_trump(
+        &mut self,
+        player: Rc<RefCell<Player>>,
+        card: Card,
+    ) -> Result<(), PlayerError> {
         if let Some(pos) = self.can_swap_trump(player.clone()) {
             {
                 if player.borrow().cards[pos] != card {
@@ -377,14 +399,8 @@ impl SchnapsenDuo {
                 borrow.cards.push(trump.clone());
                 self.trump = Some(other.clone());
 
-                self.notify_priv(
-                    borrow.id.clone(),
-                    PrivateEvent::CardAvailabe(trump),
-                );
-                self.notify_priv(
-                    borrow.id.clone(),
-                    PrivateEvent::CardUnavailabe(other),
-                );
+                self.notify_priv(borrow.id.clone(), PrivateEvent::CardAvailabe(trump));
+                self.notify_priv(borrow.id.clone(), PrivateEvent::CardUnavailabe(other));
             }
 
             self.notify_pub(PublicEvent::TrumpChange(
@@ -513,10 +529,7 @@ impl SchnapsenDuo {
                 cards: announcement,
                 announcement_type: models::AnnounceType::Twenty,
             };
-            self.notify_priv(
-                id.clone(),
-                PrivateEvent::CanAnnounce(announcement),
-            );
+            self.notify_priv(id.clone(), PrivateEvent::CanAnnounce(announcement));
         }
 
         if let Some(announcement) = self.can_announce_40(player) {
@@ -532,7 +545,7 @@ impl SchnapsenDuo {
         if self.can_swap_trump(player.clone()).is_some() {
             self.notify_priv(
                 player.borrow().id.clone(),
-                PrivateEvent::TrumpChange(self.trump.as_ref().unwrap().clone()),
+                PrivateEvent::TrumpChangePossible(self.trump.as_ref().unwrap().clone()),
             );
         }
     }
@@ -540,18 +553,23 @@ impl SchnapsenDuo {
     fn run_after_move_checks(&mut self) {}
 
     fn swap_to(&mut self, player: Rc<RefCell<Player>>) {
-        if Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
+        if self.active.is_none() || Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return;
         }
         let user_id = self.active.as_deref().unwrap().borrow().id.clone();
-        self.notify_pub(PublicEvent::Inactive(user_id.clone()));
-        self.notify_priv(user_id, PrivateEvent::Inactive);
+        self.notify_pub(PublicEvent::Inactive {
+            user_id: user_id.clone(),
+        });
 
-        let _ = self.active.insert(player);
+        self.make_active(player);
+    }
 
-        let user_id = self.active.as_deref().unwrap().borrow().id.clone();
-        self.notify_pub(PublicEvent::Active(user_id.clone()));
-        self.notify_priv(user_id, PrivateEvent::Active);
+    fn make_active(&mut self, player: Rc<RefCell<Player>>) {
+        let user_id = self.active.insert(player).borrow().id.clone();
+
+        self.notify_pub(PublicEvent::Active {
+            user_id,
+        });
     }
 
     fn handle_trick(&mut self) -> Result<(), PlayerError> {
@@ -577,14 +595,10 @@ impl SchnapsenDuo {
         };
 
         self.swap_to(won.clone());
-        self.notify_pub(PublicEvent::Trick(
-            won.as_ref().borrow().id.clone(),
-            self.stack.clone().try_into().unwrap(),
-        ));
-        self.notify_priv(
-            won.borrow().id.clone(),
-            PrivateEvent::Trick(self.stack.clone().try_into().unwrap()),
-        );
+        self.notify_pub(PublicEvent::Trick {
+            user_id: won.as_ref().borrow().id.clone(),
+            cards: self.stack.clone().try_into().unwrap(),
+        });
 
         won.as_ref()
             .borrow_mut()
@@ -630,10 +644,10 @@ impl SchnapsenDuo {
             points = 1;
         }
         winner.as_ref().borrow_mut().points += points;
-        self.notify_pub(PublicEvent::Result(
-            winner.borrow().id.clone(),
+        self.notify_pub(PublicEvent::Result {
+            user_id: winner.borrow().id.clone(),
             points,
-        ));
+        });
 
         winner.as_ref().borrow_mut().reset();
         loser.as_ref().borrow_mut().reset();
@@ -657,9 +671,9 @@ impl SchnapsenDuo {
             player.as_ref().borrow().id.clone(),
             PrivateEvent::CardAvailabe(card.clone()),
         );
-        self.notify_pub(PublicEvent::ReceiveCard(
-            player.as_ref().borrow().id.clone(),
-        ));
+        self.notify_pub(PublicEvent::ReceiveCard {
+            user_id: player.as_ref().borrow().id.clone(),
+        });
         player.as_ref().borrow_mut().cards.push(card);
     }
 

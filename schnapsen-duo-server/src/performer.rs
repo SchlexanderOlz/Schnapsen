@@ -2,6 +2,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::{Arc, Mutex}};
 
 use schnapsen_rs::SchnapsenDuo;
 use thiserror::Error;
+use tracing::debug;
 
 use crate::translator::{SchnapsenDuoActions, SchnapsenDuoEmptyActions};
 
@@ -45,14 +46,21 @@ impl<'a> Performer<'a>
         let player = instance.lock().unwrap().get_player(player_id.as_str()).unwrap();
 
         Self {
-            player: player,
+            player,
             instance,
             functions,
         }
     }
 
     pub fn perform(&self, action: SchnapsenDuoActions) -> Result<(), PerformerError> {
-        self.functions.get(&action.clone().into()).unwrap()(self.instance.clone(), self.player.clone(), action)
+        debug!("Performing action: {:?} by player: {:?}", action, self.player.borrow().id);
+        let res = self.functions.get(&action.clone().into()).unwrap()(self.instance.clone(), self.player.clone(), action.clone());
+        if res.is_err() {
+            debug!("Error performing action: {:?} by player: {:?}", action, self.player.borrow().id);
+        } else {
+            debug!("Successfully performed action: {:?} by player: {:?}", action, self.player.borrow().id);
+        }
+        res
     }
 
     fn play_card(instance: Arc<Mutex<SchnapsenDuo>>, player: Rc<RefCell<schnapsen_rs::models::Player>>, action: SchnapsenDuoActions) -> Result<(), PerformerError> {
@@ -86,7 +94,7 @@ impl<'a> Performer<'a>
     }
 
     fn draw_card(instance: Arc<Mutex<SchnapsenDuo>>, player: Rc<RefCell<schnapsen_rs::models::Player>>, action: SchnapsenDuoActions) -> Result<(), PerformerError> {
-        Ok(instance.lock().unwrap().draw_card(player)?)
+        Ok(instance.lock().unwrap().draw_card_after_trick(player)?)
     }
 
     fn cutt_deck(instance: Arc<Mutex<SchnapsenDuo>>, player: Rc<RefCell<schnapsen_rs::models::Player>>, action: SchnapsenDuoActions) -> Result<(), PerformerError> {

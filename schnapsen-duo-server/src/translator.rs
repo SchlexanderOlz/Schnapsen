@@ -10,8 +10,9 @@ use socketioxide::{
     extract::{Data, SocketRef},
     handler::MessageHandler,
 };
+use tracing::debug;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SchnapsenDuoActions {
     PlayCard(Card),
     Quit,
@@ -108,19 +109,24 @@ where
     pub fn listen(socket: SocketRef) -> Arc<Self> {
         let new = Arc::new(Self {
             callbacks: Mutex::new(Vec::new()),
-            socket: socket.clone()
+            socket 
         });
-        new.clone().init_events(socket);
+        new.clone().init_events();
+        debug!("Initialized events");
         new
     }
 
 
-    fn init_events(self: Arc<Self>, socket: SocketRef) {
+    fn init_events(self: Arc<Self>) {
+        debug!("Initializing events");
+        let socket = self.socket.clone();
         let clone = self.clone();
+        debug!("Saus");
         socket.on(
             SchnapsenDuoEmptyActions::PlayCard.event_name(),
-            move |Data(data): Data<Card>| clone.notify(SchnapsenDuoActions::PlayCard(data)),
+            move |Data(data): Data<Card>| async move { clone.notify(SchnapsenDuoActions::PlayCard(data))},
         );
+        debug!("Initialized play_card");
         let clone = self.clone();
         socket.on(SchnapsenDuoEmptyActions::Quit.event_name(), move || {
             clone.notify(SchnapsenDuoActions::Quit)

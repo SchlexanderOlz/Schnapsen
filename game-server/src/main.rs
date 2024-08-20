@@ -1,13 +1,13 @@
 use listener::{MatchCreated, ModeServerMatchCreated};
 use serde::Serialize;
-use tracing::info;
+use tracing::{debug, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod listener;
 mod games;
 
 
-const SERVER_IP: &str = "schnapsen-duo-server";
+const SERVER_IP: &str = "10.10.0.26";
 
 #[derive(Serialize)]
 pub struct GameServer {
@@ -27,8 +27,9 @@ pub struct GameMode {
 
 #[tokio::main]
 async fn main() {
-    let handle = tokio::task::spawn(listener::listen(on_new_match));
     tracing::subscriber::set_global_default(FmtSubscriber::default()).unwrap();
+    info!("Starting Server");
+    let handle = tokio::task::spawn(listener::listen(on_new_match));
 
 
     let server_info = GameServer {
@@ -40,16 +41,18 @@ async fn main() {
                 computer_lobby: false,
             }
         ],
-        server: "http://game-server:5050".to_string(),
+        server: "http://10.10.0.26:5050".to_string(),
         token: "token".to_string(),
     };
     let client = reqwest::Client::new();
-    client.post("http://games-agent:7000/register").json(&server_info).send().await.unwrap();
+    let url = "http://games-agent:7000/register";
+    client.post(url).json(&server_info).send().await.unwrap();
+    info!("Registered Game at {url}");
     handle.await.unwrap();
 }
 
 async fn on_new_match(new_match: listener::CreateMatch) -> MatchCreated {
-    info!("Creating new match: {:?}", new_match);
+    debug!("Creating new match: {:?}", new_match);
     let client = reqwest::Client::new();
     let response: ModeServerMatchCreated = client.post(format!("http://{}:{}", SERVER_IP, 6060)) // TODO: Get the actuall port of the Mode-Server from some in-memory store
         .json(&new_match)
