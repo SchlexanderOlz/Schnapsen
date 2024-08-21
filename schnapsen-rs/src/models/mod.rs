@@ -34,7 +34,8 @@ pub enum CardSuit {
 pub struct Player {
     pub id: String,
     pub cards: Vec<Card>,
-    pub tricks: Vec<(Card, Card)>,
+    pub playable_cards: Vec<Card>,
+    pub tricks: Vec<[Card; 2]>,
     pub announcement: Option<Announcement>,
     pub points: u8,
 }
@@ -44,6 +45,17 @@ impl Player {
         self.cards.clear();
         self.tricks.clear();
         self.announcement = None;
+    }
+
+    pub fn new(id: String) -> Self {
+        Player {
+            id,
+            cards: Vec::new(),
+            playable_cards: Vec::new(),
+            tricks: Vec::new(),
+            announcement: None,
+            points: 0,
+        }
     }
 }
 
