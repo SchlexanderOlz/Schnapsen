@@ -13,6 +13,12 @@ services:
       - "./game-server:/usr/game-server"
     networks:
       - game-night-network
+    environment:
+      - GAME_REGISTER_URL=http://games-agent:7000/register
+      - PUBLIC_ADDR=10.10.0.26:5050
+      - HOST_ADDR=0.0.0.0:5050
+      - SCHNAPSEN_DUO_CREATE_URL=http://schnapsen-duo-server:6060/
+      - SCHNAPSEN_DUO_PUBLIC_ADDR=10.10.0.26:6060
 
   schnapsen-duo-server:
     build:
@@ -27,6 +33,8 @@ services:
       - "./schnapsen-rs:/usr/schnapsen-rs"
     networks:
       - game-night-network
+    environment:
+      - HOST_ADDR=0.0.0.0:6060
 
 networks:
   game-night-network:

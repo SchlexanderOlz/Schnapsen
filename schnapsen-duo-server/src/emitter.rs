@@ -9,7 +9,14 @@ pub fn to_private_event_emitter<'a>(
         PrivateEvent::CanAnnounce(_) => "can_announce",
         PrivateEvent::CardAvailabe(_) => "card_available",
         PrivateEvent::CardUnavailabe(_) => "card_unavailable",
-        PrivateEvent::TrumpChangePossible(_) => "trump_change",
+        PrivateEvent::TrumpChangePossible(_) => "trump_change_possible",
+        PrivateEvent::CardPlayable(_) => "card_playable",
+        PrivateEvent::CardNotPlayable(_) => "card_not_playable",
+        PrivateEvent::AllowDrawCard => "allow_draw_card",
+        PrivateEvent::AllowPlayCard => "allow_play_card",
+        PrivateEvent::AllowAnnounce => "allow_announce",
+        PrivateEvent::CannotAnnounce(_) => "cannot_announce",
+        PrivateEvent::TrumpChangeImpossible(_) => "trump_change_impossible", 
     };
     debug!("Emitting private event: {}", event_name);
     move |socket: SocketRef| socket.emit(event_name, event.clone())

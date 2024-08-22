@@ -1,4 +1,4 @@
-use std::{cell::RefCell, default, hash::Hash};
+use std::hash::Hash;
 
 use num_enum::FromPrimitive;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ pub enum CardVal {
     Queen = 3,
     King = 4,
     #[default]
-    Ace = 11
+    Ace = 11,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, FromPrimitive, PartialEq, Eq)]
@@ -27,7 +27,7 @@ pub enum CardSuit {
     Hearts = 0,
     Diamonds = 1,
     Clubs = 2,
-    Spades = 3
+    Spades = 3,
 }
 
 #[derive(Clone)]
@@ -37,6 +37,8 @@ pub struct Player {
     pub playable_cards: Vec<Card>,
     pub tricks: Vec<[Card; 2]>,
     pub announcement: Option<Announcement>,
+    pub announcable: Option<Announcement>,
+    pub possible_trump_swap: Option<Card>,
     pub points: u8,
 }
 
@@ -54,7 +56,9 @@ impl Player {
             playable_cards: Vec::new(),
             tricks: Vec::new(),
             announcement: None,
+            announcable: None,
             points: 0,
+            possible_trump_swap: None,
         }
     }
 }
@@ -68,7 +72,7 @@ impl Hash for Player {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Announcement {
     pub cards: [Card; 2],
-    pub announcement_type: AnnounceType,
+    pub announce_type: AnnounceType,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, FromPrimitive, PartialEq, Eq)]

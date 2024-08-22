@@ -6,8 +6,8 @@ use std::ops::Index;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use futures::future::{join, join_all, Map};
-use futures::{FutureExt, SinkExt};
+use futures::future::join_all;
+use futures::FutureExt;
 use models::Announcement;
 use models::{Card, Player};
 use rand::prelude::*;
@@ -82,15 +82,17 @@ impl std::error::Error for PlayerError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data")]
 pub enum PrivateEvent {
-    // TODO: Continue here with finding all events which happen in the game. Then add handlers
     CanAnnounce(Announcement),
+    CannotAnnounce(Announcement),
     CardAvailabe(Card),
     CardUnavailabe(Card),
     CardPlayable(Card),
     CardNotPlayable(Card),
     TrumpChangePossible(Card),
+    TrumpChangeImpossible(Card),
     AllowPlayCard,
     AllowDrawCard,
+    AllowAnnounce,
 }
 
 // TODO: Alle user_ids are currently serialized as the write-tokens. This has to be changed. SECURITY RISK
@@ -260,6 +262,9 @@ impl SchnapsenDuo {
         if new.cards.len() < 5 {
             self.notify_priv(new.id.clone(), PrivateEvent::AllowDrawCard);
         } else {
+            if new.announcable.is_some() {
+                self.notify_priv(new.id.clone(), PrivateEvent::AllowAnnounce);
+            }
             self.notify_priv(new.id.clone(), PrivateEvent::AllowPlayCard);
         }
         Ok(())
@@ -278,7 +283,7 @@ impl SchnapsenDuo {
         self.notify_pub(PublicEvent::ReceiveCard {
             user_id: player.borrow().id.clone(),
         });
-        self.run_announce_checks(player.clone());
+        self.update_announcable_props(player.clone());
         self.run_swap_trump_check(player.clone());
         self.update_playable_cards(player);
 
@@ -469,7 +474,7 @@ impl SchnapsenDuo {
 
         let announcement = models::Announcement {
             cards: cards_to_announce.unwrap(),
-            announcement_type: models::AnnounceType::Forty,
+            announce_type: models::AnnounceType::Forty,
         };
 
         player.borrow_mut().announcement = Some(announcement.clone());
@@ -490,7 +495,7 @@ impl SchnapsenDuo {
 
         let announcement = models::Announcement {
             cards: announce,
-            announcement_type: models::AnnounceType::Forty,
+            announce_type: models::AnnounceType::Forty,
         };
 
         player.borrow_mut().announcement = Some(announcement.clone());
@@ -589,30 +594,60 @@ impl SchnapsenDuo {
         handles
     }
 
-    fn run_announce_checks(&self, player: Rc<RefCell<Player>>) {
+    fn update_announcable_props(&self, player: Rc<RefCell<Player>>) {
         let id = player.borrow().id.clone();
-        if let Some(announcement) = self.can_announce_20(player.clone()) {
-            let announcement = Announcement {
-                cards: announcement,
-                announcement_type: models::AnnounceType::Twenty,
+        let has_announceable = player.borrow().announcable.is_some();
+        let mut announcement;
+        if let Some(announcement_cards) = self.can_announce_20(player.clone()) {
+            announcement = Announcement {
+                cards: announcement_cards,
+                announce_type: models::AnnounceType::Twenty,
             };
-            self.notify_priv(id.clone(), PrivateEvent::CanAnnounce(announcement));
+        } else {
+            if !has_announceable {
+                return;
+            }
+            self.notify_priv(
+                id,
+                PrivateEvent::CannotAnnounce(player.borrow_mut().announcable.take().unwrap()),
+            );
+            return;
         }
 
-        if let Some(announcement) = self.can_announce_40(player) {
-            let announcement = Announcement {
-                cards: announcement,
-                announcement_type: models::AnnounceType::Forty,
-            };
-            self.notify_priv(id, PrivateEvent::CanAnnounce(announcement));
+        if has_announceable {
+            return;
         }
+
+        if let Some(announcement_cards) = self.can_announce_40(player.clone()) {
+            announcement = Announcement {
+                cards: announcement_cards,
+                announce_type: models::AnnounceType::Forty,
+            };
+        }
+
+        player.borrow_mut().announcable = Some(announcement.clone());
+        self.notify_priv(id, PrivateEvent::CanAnnounce(announcement));
     }
 
     fn run_swap_trump_check(&self, player: Rc<RefCell<Player>>) {
-        if self.can_swap_trump(player.clone()).is_some() {
+        let can_swap = player.borrow().possible_trump_swap.is_some();
+        let id = player.borrow().id.clone();
+        if let Some(swap) = self.can_swap_trump(player.clone()) {
+            if can_swap {
+                return;
+            }
             self.notify_priv(
-                player.borrow().id.clone(),
-                PrivateEvent::TrumpChangePossible(self.trump.as_ref().unwrap().clone()),
+                id,
+                PrivateEvent::TrumpChangePossible(player.borrow().cards[swap].clone()),
+            );
+            return;
+        }
+        if can_swap {
+            self.notify_priv(
+                id,
+                PrivateEvent::TrumpChangeImpossible(
+                    player.borrow_mut().possible_trump_swap.take().unwrap(),
+                ),
             );
         }
     }
@@ -703,7 +738,7 @@ impl SchnapsenDuo {
                         .as_ref()
                         .map(|a| {
                             if player.tricks.len() > 0 {
-                                a.announcement_type.clone() as u8
+                                a.announce_type.clone() as u8
                             } else {
                                 0 as u8
                             }

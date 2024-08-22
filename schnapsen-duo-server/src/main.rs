@@ -6,10 +6,10 @@ use std::{
 
 use axum;
 use listener::MatchCreated;
-use schnapsen_rs::{PrivateEvent, PublicEvent, SchnapsenDuo};
+use schnapsen_rs::SchnapsenDuo;
 use socketioxide::{
     extract::{Data, SocketRef},
-    socket, SocketIo,
+    SocketIo,
 };
 use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -19,9 +19,6 @@ mod listener;
 mod performer;
 mod translator;
 
-const DEFAULT_URL: &str = "0.0.0.0:6060"; // TODO: Set the default URL correctly at some point and register it at the game-server
-
-const USER_EVENT_ROOM: &str = "user-events";
 const PUBLIC_EVENT_ROOM: &str = "public-events";
 
 fn setup_private_access(player_id: &str, instance: Arc<Mutex<SchnapsenDuo>>, socket: SocketRef) {
@@ -119,12 +116,16 @@ fn setup_read_ns(
 
 #[tokio::main]
 async fn main() {
+    let host_url = std::env::var("HOST_ADDR").expect("HOST_ADDR must be set");
+
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
     info!("Starting Schnapsen Duo Server");
-    let listener = tokio::net::TcpListener::bind(DEFAULT_URL).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(host_url.as_str())
+        .await
+        .unwrap();
     let (layer, io) = socketioxide::SocketIo::new_layer();
     let io = Arc::new(io);
 
@@ -133,6 +134,6 @@ async fn main() {
     let on_create = move |new_match: listener::CreateMatch| setup_new_match(io.clone(), new_match);
 
     let router = listener::listen(router, on_create);
-    info!("Listening on {}", DEFAULT_URL);
+    info!("Listening on {}", host_url);
     axum::serve(listener, router).await.unwrap();
 }

@@ -1,12 +1,7 @@
-use std::{collections::HashMap, future::Future, net::TcpListener, sync::Arc};
+use std::{collections::HashMap, future::Future, sync::Arc};
 
-use axum::{
-    extract::State, response::IntoResponseParts, response::Json as JsonResponse, routing::post,
-    Json,
-};
+use axum::{extract::State, response::Json as JsonResponse, routing::post, Json};
 use serde::{Deserialize, Serialize};
-
-const DEFAULT_URL: &str = "0.0.0.0:5050";
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct CreateMatch {
@@ -35,18 +30,14 @@ pub struct ModeServerMatchCreated {
     pub read: String,
 }
 
-pub async fn listen<T, F>(on_create: T)
+pub fn listen<T, F>(router: axum::Router<Arc<T>>, on_create: T) -> axum::Router
 where
     T: Send + Sync + 'static + Fn(CreateMatch) -> F,
     F: Send + Sync + 'static + Future<Output = MatchCreated>,
 {
-    let listener = tokio::net::TcpListener::bind(DEFAULT_URL).await.unwrap();
-
-    let app = axum::Router::new()
+    router
         .route("/", post(handle_create))
-        .with_state(Arc::new(on_create));
-
-    axum::serve(listener, app).await.unwrap();
+        .with_state(Arc::new(on_create))
 }
 
 async fn handle_create<F>(
