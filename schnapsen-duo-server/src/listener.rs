@@ -2,6 +2,8 @@ use std::{collections::HashMap, future::Future, sync::Arc};
 
 use axum::{extract::State, response::Json as JsonResponse, routing::post, Json};
 use serde::{Deserialize, Serialize};
+use tower::ServiceBuilder;
+use tower_http::trace::TraceLayer;
 
 
 #[derive(Deserialize, Debug)]
@@ -22,6 +24,7 @@ pub struct GameMode {
 pub struct MatchCreated {
     pub player_write: HashMap<String, String>,
     pub read: String,
+    pub url: String,
 }
 
 pub fn listen<T, F>(router: axum::Router<Arc<T>>, on_create: T) -> axum::Router
@@ -32,6 +35,7 @@ where
    router 
         .route("/", post(handle_create))
         .with_state(Arc::new(on_create))
+        .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()).into_inner())
 }
 
 async fn handle_create<F>(

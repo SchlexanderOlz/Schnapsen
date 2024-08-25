@@ -64,6 +64,8 @@ fn setup_new_match(
     instance.lock().unwrap().hash(&mut hasher);
     let read = hasher.finish();
 
+    let public_url = std::env::var("SCHNAPSEN_DUO_PUBLIC_ADDR").expect("SCHNAPSEN_DUO_PUBLIC_ADDR must be set");
+
     async move {
         io.ns(format!("/{read}"), move |socket: SocketRef| {
             setup_read_ns(socket, instance, read, players_connected, write_len);
@@ -76,6 +78,7 @@ fn setup_new_match(
                 .zip(write.into_iter())
                 .collect(),
             read: read.to_string(),
+            url: public_url,
         }
     }
 }
