@@ -5,7 +5,7 @@ services:
     build:
       context: ./game-server
     container_name: game-server
-    command: cargo run
+    command: cargo run --release
     ports:
       - "5050:5050"
     restart: on-failure
@@ -20,7 +20,7 @@ services:
     build:
       context: ./schnapsen-duo-server
     container_name: schnapsen-duo-server
-    command: cargo run
+    command: cargo run --release
     ports:
       - "6060:6060"
     restart: on-failure
