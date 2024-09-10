@@ -9,8 +9,6 @@ services:
     ports:
       - "5050:5050"
     restart: on-failure
-    volumes:
-      - "./game-server:/usr/game-server"
     networks:
       - game-night-network
     environment:
@@ -26,9 +24,6 @@ services:
     ports:
       - "6060:6060"
     restart: on-failure
-    volumes:
-      - "./schnapsen-duo-server:/usr/schnapsen-duo-server"
-      - "./schnapsen-rs:/usr/schnapsen-rs"
     networks:
       - game-night-network
     environment:
