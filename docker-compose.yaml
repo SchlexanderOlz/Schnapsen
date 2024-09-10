@@ -38,9 +38,8 @@ services:
     volumes:
       - "./proxy:/usr/local/etc/haproxy:ro"
     ports:
-      - "80:80"
+      - "3737:80"
       - "8404:8404"
- 
 
 networks:
   game-night-network:
