@@ -11,6 +11,7 @@ use socketioxide::{
     extract::{Data, SocketRef},
     SocketIo,
 };
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
@@ -136,7 +137,7 @@ async fn main() {
 
     let on_create = move |new_match: listener::CreateMatch| setup_new_match(io.clone(), new_match);
 
-    let router = listener::listen(router, on_create);
+    let router = listener::listen(router, on_create).layer(CorsLayer::new().allow_origin(Any));
     info!("Listening on {}", host_url);
     axum::serve(listener, router).await.unwrap();
 }
