@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tracing::info;
+use tracing::{debug, error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod games;
@@ -21,7 +21,12 @@ pub struct GameMode {
 
 #[tokio::main]
 async fn main() {
-    tracing::subscriber::set_global_default(FmtSubscriber::default()).unwrap();
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::DEBUG)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
     info!("Starting Server");
 
     let public_addr = std::env::var("PUBLIC_ADDR").expect("PUBLIC_ADDR must be set");
@@ -37,11 +42,18 @@ async fn main() {
     };
     let client = reqwest::Client::new();
     let url = std::env::var("GAME_REGISTER_URL").expect("GAME_REGISTER_URL must be set");
-    client
+    let res = client
         .post(url.as_str())
         .json(&server_info)
         .send()
         .await
         .unwrap();
-    info!("Registered Game at {url}");
+
+    debug!("{:?}", res);
+
+    if let Err(err) = res.error_for_status() {
+        error!("Game could not be registered. Err: {}", err)
+    } else {
+        info!("Registered Game at {url}");
+    }
 }
