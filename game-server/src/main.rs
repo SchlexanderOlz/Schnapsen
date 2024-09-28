@@ -1,3 +1,5 @@
+use std::{thread, time::Duration};
+
 use serde::Serialize;
 use tracing::{debug, error, info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -17,6 +19,27 @@ pub struct GameMode {
     pub name: String,
     pub player_count: u32,
     pub computer_lobby: bool,
+}
+
+#[async_recursion::async_recursion]
+async fn try_connect(url: &str, server_info: &GameServer) {
+    let client = reqwest::Client::new();
+    let res = client
+        .post(url)
+        .json(server_info)
+        .send()
+        .await
+        .unwrap();
+
+    debug!("{:?}", res);
+
+    if let Err(err) = res.error_for_status() {
+        error!("Game could not be registered. Err: {}", err);
+        thread::sleep(Duration::from_secs(2));
+        try_connect(url, server_info).await;
+    } else {
+        info!("Registered Game at {url}");
+    }
 }
 
 #[tokio::main]
@@ -40,20 +63,7 @@ async fn main() {
         server: public_addr,
         token: "token".to_string(),
     };
-    let client = reqwest::Client::new();
     let url = std::env::var("GAME_REGISTER_URL").expect("GAME_REGISTER_URL must be set");
-    let res = client
-        .post(url.as_str())
-        .json(&server_info)
-        .send()
-        .await
-        .unwrap();
 
-    debug!("{:?}", res);
-
-    if let Err(err) = res.error_for_status() {
-        error!("Game could not be registered. Err: {}", err)
-    } else {
-        info!("Registered Game at {url}");
-    }
+    try_connect(url.as_str(), &server_info).await;
 }
