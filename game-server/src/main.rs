@@ -10,7 +10,8 @@ mod games;
 pub struct GameServer {
     pub name: String,
     pub modes: Vec<GameMode>,
-    pub server: String,
+    pub server_priv: String,
+    pub server_pub: String,
     pub token: String, // Token to authorize as the main-server at this game-server
 }
 
@@ -53,6 +54,7 @@ async fn main() {
     info!("Starting Server");
 
     let public_addr = std::env::var("PUBLIC_ADDR").expect("PUBLIC_ADDR must be set");
+    let private_addr = std::env::var("PRIVATE_ADDR").expect("PRIVATE_ADDR must be set");
     let server_info = GameServer {
         name: "Schnapsen".to_string(),
         modes: vec![GameMode {
@@ -60,7 +62,8 @@ async fn main() {
             player_count: 2,
             computer_lobby: false,
         }],
-        server: public_addr,
+        server_pub: public_addr,
+        server_priv: private_addr,
         token: "token".to_string(),
     };
     let url = std::env::var("GAME_REGISTER_URL").expect("GAME_REGISTER_URL must be set");

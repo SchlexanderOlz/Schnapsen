@@ -14,6 +14,7 @@ services:
     environment:
       - GAME_REGISTER_URL=http://games-agent:7000/register
       - PUBLIC_ADDR=${GAME_SERVER_PUBLIC_ADDR}
+      - PRIVATE_ADDR=${GAME_SERVER_PRIVATE_ADDR}
       - SCHNAPSEN_DUO_CREATE_URL=http://schnapsen-duo-server:6060/
 
   schnapsen-duo-server:
@@ -28,7 +29,8 @@ services:
       - game-night-network
     environment:
       - HOST_ADDR=0.0.0.0:6060
-      - SCHNAPSEN_DUO_PUBLIC_ADDR=${SCHNAPSEN_DUO_PUBLIC_ADDR}
+      - PUBLIC_ADDR=${SCHNAPSEN_DUO_PUBLIC_ADDR}
+      - PRIVATE_ADDR=${SCHNAPSEN_DUO_PRIVATE_ADDR}
     
   proxy:
     image: haproxytech/haproxy-alpine:2.4

@@ -24,7 +24,8 @@ pub struct GameMode {
 pub struct MatchCreated {
     pub player_write: HashMap<String, String>,
     pub read: String,
-    pub url: String,
+    pub url_pub: String,
+    pub url_priv: String
 }
 
 pub fn listen<T, F>(router: axum::Router<Arc<T>>, on_create: T) -> axum::Router
