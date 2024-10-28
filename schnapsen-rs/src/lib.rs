@@ -844,9 +844,7 @@ impl SchnapsenDuo {
         let mut playable = 'inner: {
             let allowed_suit;
 
-            if self.trump.is_some() {
-                allowed_suit = self.trump.as_ref().unwrap().suit.clone();
-            } else if !self.stack.is_empty() {
+            if !self.stack.is_empty() && self.taken_trump.is_some() {
                 allowed_suit = self.stack.first().unwrap().suit.clone();
             } else {
                 break 'inner player.borrow().cards.clone();
