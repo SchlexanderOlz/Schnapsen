@@ -844,9 +844,7 @@ impl SchnapsenDuo {
         let mut playable = 'inner: {
             let allowed_suit;
 
-            if self.trump.is_some() {
-                allowed_suit = self.trump.as_ref().unwrap().suit.clone();
-            } else if !self.stack.is_empty() {
+            if !self.stack.is_empty() && self.taken_trump.is_some() {
                 allowed_suit = self.stack.first().unwrap().suit.clone();
             } else {
                 break 'inner player.borrow().cards.clone();
@@ -896,7 +894,20 @@ impl SchnapsenDuo {
     fn take_trump(&mut self, player: Rc<RefCell<Player>>) {
         let taken_trump = self
             .taken_trump
-            .insert((player.clone(), self.trump.take().unwrap()));
+            .insert((player.clone(), self.trump.take().unwrap())).clone();
+
         player.borrow_mut().cards.push(taken_trump.1.clone());
+
+        // TODO: Everything after this line should be consolidated into a function, as it is also needed in self.draw_card
+        self.notify_priv(player.borrow().id.clone(), PrivateEvent::CardAvailabe(taken_trump.1));
+        self.notify_pub(PublicEvent::ReceiveCard {
+            user_id: player.borrow().id.clone(),
+        });
+
+        self.notify_pub(PublicEvent::DeckCardCount(self.deck.len()));
+
+        self.run_swap_trump_check(player.clone());
+        self.update_playable_cards(player.clone());
+        self.update_announcable_props(player);
     }
 }

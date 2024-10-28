@@ -55,6 +55,11 @@ async fn main() {
 
     let public_addr = std::env::var("PUBLIC_ADDR").expect("PUBLIC_ADDR must be set");
     let private_addr = std::env::var("PRIVATE_ADDR").expect("PRIVATE_ADDR must be set");
+
+    if public_addr.is_empty() || private_addr.is_empty() {
+        error!("PUBLIC_ADDR and PRIVATE_ADDR should be set to some none-emtpy value");
+    }
+
     let server_info = GameServer {
         name: "Schnapsen".to_string(),
         modes: vec![GameMode {
