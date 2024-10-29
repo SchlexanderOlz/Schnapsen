@@ -2,6 +2,7 @@ use core::fmt;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::mem::take;
 use std::ops::Index;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -252,6 +253,7 @@ impl SchnapsenDuo {
         if player.borrow().cards.len() == 5 {
             return Err(PlayerError::CantTakeCardHaveAlreadyFive);
         }
+
         if let Err(PlayerError::CantTakeCardDeckEmpty) = self.draw_card(player.clone()) {
             self.take_trump(player);
         }
@@ -710,7 +712,6 @@ impl SchnapsenDuo {
         };
 
         let won_id = won.borrow().id.clone();
-        self.swap_to(won.clone());
         self.notify_pub(PublicEvent::Trick {
             user_id: won_id.clone(),
             cards: self.stack.clone().try_into().unwrap(),
@@ -720,6 +721,8 @@ impl SchnapsenDuo {
             .borrow_mut()
             .tricks
             .push([self.stack.pop().unwrap(), self.stack.pop().unwrap()]);
+
+        self.swap_to(won.clone());
 
         if !self.deck.is_empty() {
             self.notify_priv(won_id, PrivateEvent::AllowDrawCard);
@@ -899,15 +902,13 @@ impl SchnapsenDuo {
         player.borrow_mut().cards.push(taken_trump.1.clone());
 
         // TODO: Everything after this line should be consolidated into a function, as it is also needed in self.draw_card
+        self.notify_pub(PublicEvent::DeckCardCount(self.deck.len()));
         self.notify_priv(player.borrow().id.clone(), PrivateEvent::CardAvailabe(taken_trump.1));
         self.notify_pub(PublicEvent::ReceiveCard {
             user_id: player.borrow().id.clone(),
         });
-
-        self.notify_pub(PublicEvent::DeckCardCount(self.deck.len()));
-
+        self.update_announcable_props(player.clone());
         self.run_swap_trump_check(player.clone());
-        self.update_playable_cards(player.clone());
-        self.update_announcable_props(player);
+        self.update_playable_cards(player);
     }
 }
