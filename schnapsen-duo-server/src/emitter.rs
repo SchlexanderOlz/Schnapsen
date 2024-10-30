@@ -38,6 +38,7 @@ pub fn to_public_event_emitter<'a>(
         PublicEvent::TrumpChange { .. } => "trump_change",
         PublicEvent::Result { .. } => "result",
         PublicEvent::FinishedDistribution { .. } => "finished_distribution",
+        PublicEvent::Score { .. } => "score",
     };
 
     debug!("Emitting public event: {}", event_name);

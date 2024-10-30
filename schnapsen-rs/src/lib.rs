@@ -100,6 +100,10 @@ pub enum PrivateEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data")]
 pub enum PublicEvent {
+    Score {
+        user_id: String,
+        points: u8,
+    },
     PlayCard {
         user_id: String,
         card: Card,
@@ -370,7 +374,7 @@ impl SchnapsenDuo {
         callbacks.extend(
             player_order
                 .into_iter()
-                .map(|player| self.update_playable_cards(player))
+                .map(|player| self.update_playable_cards(player.clone()).into_iter().chain(self.run_swap_trump_check(player).into_iter()))
                 .flatten(),
         );
 
@@ -463,6 +467,7 @@ impl SchnapsenDuo {
             self.notify_pub(PublicEvent::TrumpChange(
                 self.trump.as_ref().unwrap().clone(),
             ));
+            self.update_playable_cards(player);
             return Ok(());
         }
         Err(PlayerError::CantSwapTrump)
@@ -631,27 +636,29 @@ impl SchnapsenDuo {
         self.notify_priv(id, PrivateEvent::CanAnnounce(announcement));
     }
 
-    fn run_swap_trump_check(&self, player: Rc<RefCell<Player>>) {
+    fn run_swap_trump_check(&self, player: Rc<RefCell<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut callbacks = Vec::new();
         let can_swap = player.borrow().possible_trump_swap.is_some();
         let id = player.borrow().id.clone();
         if let Some(swap) = self.can_swap_trump(player.clone()) {
             if can_swap {
-                return;
+                return callbacks;
             }
-            self.notify_priv(
+            callbacks.extend(self.notify_priv(
                 id,
                 PrivateEvent::TrumpChangePossible(player.borrow().cards[swap].clone()),
-            );
-            return;
+            ));
+            return callbacks;
         }
         if can_swap {
-            self.notify_priv(
+            callbacks.extend(self.notify_priv(
                 id,
                 PrivateEvent::TrumpChangeImpossible(
                     player.borrow_mut().possible_trump_swap.take().unwrap(),
                 ),
-            );
+            ));
         }
+        callbacks
     }
 
     fn run_after_move_checks(&mut self) {}
@@ -702,6 +709,8 @@ impl SchnapsenDuo {
                 enemy.clone()
             } else if active_is_trump && !enemy_is_trump {
                 self.active.clone().unwrap()
+            } else if self.stack.last().unwrap().suit != self.stack.first().unwrap().suit {
+                enemy.clone()
             } else if self.stack.last().unwrap().value.clone() as u8
                 > self.stack.first().unwrap().value.clone() as u8
             {
@@ -754,6 +763,9 @@ impl SchnapsenDuo {
 
         let (max_points, winner) = points.clone().max_by_key(|(points, _)| *points).unwrap();
         let (min_points, loser) = points.min_by_key(|(points, _)| *points).unwrap();
+
+
+        self.notify_pub(PublicEvent::Score { user_id: winner.borrow().id.clone(), points: max_points });
 
         if max_points < 66 {
             return Ok(());
@@ -845,21 +857,18 @@ impl SchnapsenDuo {
         player: Rc<RefCell<Player>>,
     ) -> Vec<tokio::task::JoinHandle<()>> {
         let mut playable = 'inner: {
-            let allowed_suit;
-
             if !self.stack.is_empty() && self.taken_trump.is_some() {
-                allowed_suit = self.stack.first().unwrap().suit.clone();
+
+                break 'inner player
+                    .borrow()
+                    .cards
+                    .iter()
+                    .filter(|card| card.suit == self.stack.first().unwrap().suit.clone() || card.suit == self.taken_trump.as_ref().unwrap().1.suit)
+                    .cloned()
+                    .collect()
             } else {
                 break 'inner player.borrow().cards.clone();
             }
-
-            player
-                .borrow()
-                .cards
-                .iter()
-                .filter(|card| card.suit == allowed_suit)
-                .cloned()
-                .collect()
         };
 
         if playable.is_empty() {
@@ -869,7 +878,7 @@ impl SchnapsenDuo {
         let mut callbacks: Vec<_> = playable
             .iter()
             .filter_map(|card| {
-                if player.borrow().playable_cards.contains(card) {
+                if player.borrow().playable_cards.iter().any(|x| x.to_owned() == card.to_owned()) {
                     return None;
                 }
                 Some(self.notify_priv(
@@ -881,7 +890,7 @@ impl SchnapsenDuo {
             .collect();
 
         callbacks.extend(player.borrow().playable_cards.iter().filter_map(|card| {
-            if !playable.contains(card) {
+            if !playable.iter().any(|x| x.to_owned() == card.to_owned()) {
                 return Some(self.notify_priv(
                     player.borrow().id.clone(),
                     PrivateEvent::CardNotPlayable(card.clone()),
