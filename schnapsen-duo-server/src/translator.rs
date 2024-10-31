@@ -18,7 +18,7 @@ pub enum SchnapsenDuoActions {
     Quit,
     SwapTrump(Card),
     CloseTalon,
-    Announce20,
+    Announce20([Card; 2]),
     Announce40,
     DrawCard,
     CuttDeck(usize),
@@ -32,7 +32,7 @@ impl SchnapsenDuoActions {
             SchnapsenDuoActions::Quit => SchnapsenDuoEmptyActions::Quit as u8,
             SchnapsenDuoActions::SwapTrump(_) => SchnapsenDuoEmptyActions::SwapTrump as u8,
             SchnapsenDuoActions::CloseTalon => SchnapsenDuoEmptyActions::CloseTalon as u8,
-            SchnapsenDuoActions::Announce20 => SchnapsenDuoEmptyActions::Announce20 as u8,
+            SchnapsenDuoActions::Announce20(_) => SchnapsenDuoEmptyActions::Announce20 as u8,
             SchnapsenDuoActions::Announce40 => SchnapsenDuoEmptyActions::Announce40 as u8,
             SchnapsenDuoActions::DrawCard => SchnapsenDuoEmptyActions::DrawCard as u8,
             SchnapsenDuoActions::CuttDeck(_) => SchnapsenDuoEmptyActions::CuttDeck as u8,
@@ -63,7 +63,7 @@ impl From<SchnapsenDuoActions> for SchnapsenDuoEmptyActions {
             SchnapsenDuoActions::Quit => SchnapsenDuoEmptyActions::Quit,
             SchnapsenDuoActions::SwapTrump(_) => SchnapsenDuoEmptyActions::SwapTrump,
             SchnapsenDuoActions::CloseTalon => SchnapsenDuoEmptyActions::CloseTalon,
-            SchnapsenDuoActions::Announce20 => SchnapsenDuoEmptyActions::Announce20,
+            SchnapsenDuoActions::Announce20(_) => SchnapsenDuoEmptyActions::Announce20,
             SchnapsenDuoActions::Announce40 => SchnapsenDuoEmptyActions::Announce40,
             SchnapsenDuoActions::DrawCard => SchnapsenDuoEmptyActions::DrawCard,
             SchnapsenDuoActions::CuttDeck(_) => SchnapsenDuoEmptyActions::CuttDeck,
@@ -144,7 +144,7 @@ where
         let clone = self.clone();
         socket.on(
             SchnapsenDuoEmptyActions::Announce20.event_name(),
-            move || clone.notify(SchnapsenDuoActions::Announce20),
+            move |Data(data)| clone.notify(SchnapsenDuoActions::Announce20(data)),
         );
         let clone = self.clone();
         socket.on(
