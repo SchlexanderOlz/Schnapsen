@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use futures::FutureExt;
-use models::{contains_card_comb, has_announcable, Announcement};
+use models::{contains_card_comb, has_announcable, Announcement, AnnouncementProposal};
 use models::{Card, Player};
 use rand::prelude::*;
 use rand::thread_rng;
@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 pub mod models;
+mod scheduler;
 
 #[derive(Debug)]
 pub enum PlayerError {
@@ -83,8 +84,8 @@ impl std::error::Error for PlayerError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data")]
 pub enum PrivateEvent {
-    CanAnnounce(Announcement),
-    CannotAnnounce(Announcement),
+    CanAnnounce(AnnouncementProposal),
+    CannotAnnounce(AnnouncementProposal),
     CardAvailabe(Card),
     CardUnavailabe(Card),
     CardPlayable(Card),
@@ -114,7 +115,7 @@ pub enum PublicEvent {
     },
     Announce {
         user_id: String,
-        announcement: Announcement,
+        announcement: AnnouncementProposal,
     },
     Result {
         winner: String,
@@ -128,7 +129,7 @@ pub enum PublicEvent {
     CloseTalon {
         user_id: String,
     },
-    TrumpChange(Card),
+    TrumpChange(Option<Card>),
     // TrumpSwap(String, Card)
     Active {
         user_id: String,
@@ -258,6 +259,10 @@ impl SchnapsenDuo {
             return Err(PlayerError::CantTakeCardHaveAlreadyFive);
         }
 
+        if self.trump.is_none() {
+            return Err(PlayerError::CantTakeCardDeckEmpty);
+        }
+
         if let Err(PlayerError::CantTakeCardDeckEmpty) = self.draw_card(player.clone()) {
             self.take_trump(player);
         }
@@ -265,7 +270,7 @@ impl SchnapsenDuo {
         self.swap_to(self.get_non_active_player().unwrap());
 
         let new = self.active.as_deref().unwrap().borrow();
-        if new.cards.len() < 5 {
+        if new.cards.len() < 5 && self.trump.is_some() {
             self.notify_priv(new.id.clone(), PrivateEvent::AllowDrawCard);
         } else {
             if new.announcable.len() > 0 {
@@ -362,7 +367,7 @@ impl SchnapsenDuo {
             }
         }
         let trump = self.deck.pop().unwrap();
-        self.notify_pub(PublicEvent::TrumpChange(trump.clone()));
+        self.notify_pub(PublicEvent::TrumpChange(Some(trump.clone())));
         let _ = self.trump.insert(trump);
 
         for player in player_order.clone() {
@@ -468,9 +473,9 @@ impl SchnapsenDuo {
                 self.notify_priv(borrow.id.clone(), PrivateEvent::CardUnavailabe(other));
             }
 
-            self.notify_pub(PublicEvent::TrumpChange(
+            self.notify_pub(PublicEvent::TrumpChange(Some(
                 self.trump.as_ref().unwrap().clone(),
-            ));
+            )));
             self.update_playable_cards(player);
             return Ok(());
         }
@@ -483,17 +488,23 @@ impl SchnapsenDuo {
             return Err(PlayerError::CantPlay40);
         }
 
-        let announcement = models::Announcement {
+        let announcement = models::AnnouncementProposal {
             cards: cards_to_announce.unwrap(),
             announce_type: models::AnnounceType::Forty,
         };
 
-        player.borrow_mut().announcements.push(announcement.clone());
+        player
+            .borrow_mut()
+            .announcements
+            .push(announcement.clone().into());
+
         self.notify_pub(PublicEvent::Announce {
             user_id: player.borrow().id.clone(),
             announcement: announcement.clone(),
         });
         self.run_after_move_checks();
+        self.notify_changes_playable_cards(player.clone(), &announcement.cards);
+        self.update_announcable_props(player.clone());
         Ok(())
     }
 
@@ -507,25 +518,33 @@ impl SchnapsenDuo {
             return Err(PlayerError::CantPlay20);
         }
 
-        let announcement = models::Announcement {
+        let announcement = models::AnnouncementProposal {
             cards,
             announce_type: models::AnnounceType::Twenty,
         };
 
-        player.borrow_mut().announcements.push(announcement.clone());
+        player
+            .borrow_mut()
+            .announcements
+            .push(announcement.clone().into());
 
         self.notify_pub(PublicEvent::Announce {
             user_id: player.borrow().id.clone(),
             announcement: announcement.clone(),
         });
         self.run_after_move_checks();
+        self.notify_changes_playable_cards(player.clone(), &announcement.cards);
+        self.update_announcable_props(player.clone());
         Ok(())
     }
 
     #[inline]
     // TODO: This function returns a fucking value because of some stupid fucking borrowing rules your mum invented. Change this to a fucking stupid refernce as soon as possible
     fn can_announce_20(&self, player: Rc<RefCell<Player>>) -> Vec<[Card; 2]> {
-        if self.active.is_none() || !Rc::ptr_eq(&player, self.active.as_ref().unwrap()) {
+        if self.active.is_none()
+            || !Rc::ptr_eq(&player, self.active.as_ref().unwrap())
+            || self.trump.is_none()
+        {
             return Vec::new();
         }
         let player = self.active.as_deref().unwrap();
@@ -554,7 +573,13 @@ impl SchnapsenDuo {
         }
 
         for pretender in cards_to_announce {
-            if pretender.first().unwrap().suit == self.trump.as_ref().unwrap().suit {
+            // TODO: As this is needed more often, move this into it's own function
+            let trump = match self.trump {
+                Some(ref trump) => trump,
+                None => &self.taken_trump.as_ref().unwrap().1,
+            };
+
+            if pretender.first().unwrap().suit == trump.suit {
                 return Some(pretender);
             }
         }
@@ -616,14 +641,14 @@ impl SchnapsenDuo {
         let announcable_cards = self.can_announce_20(player.clone());
         let mut announcements = announcable_cards
             .iter()
-            .map(|card| Announcement {
+            .map(|card| AnnouncementProposal {
                 cards: card.clone(),
                 announce_type: models::AnnounceType::Twenty,
             })
             .collect::<Vec<_>>();
 
         if let Some(announcement_cards) = self.can_announce_40(player.clone()) {
-            let forty_announcement = Announcement {
+            let forty_announcement = AnnouncementProposal {
                 cards: announcement_cards,
                 announce_type: models::AnnounceType::Forty,
             };
@@ -635,10 +660,11 @@ impl SchnapsenDuo {
 
         for announcement in player_announcements.iter() {
             if !has_announcable(&announcements, announcement) {
-                player
-                    .borrow_mut()
-                    .announcable
-                    .retain(|x| x != announcement);
+                player.borrow_mut().announcable.retain(|x| {
+                    x.announce_type != announcement.announce_type
+                        && x.cards.first().unwrap().suit != announcement.cards.first().unwrap().suit
+                });
+
                 self.notify_priv(
                     id.clone(),
                     PrivateEvent::CannotAnnounce(announcement.clone()),
@@ -647,6 +673,18 @@ impl SchnapsenDuo {
         }
 
         for announcement in announcements {
+            if player
+                    .borrow()
+                    .announcements
+                    .iter()
+                    .any(|x| x.cards.first().unwrap().suit == announcement.cards.first().unwrap().suit)
+             {
+                player.borrow_mut().announcable.retain(|x| {
+                        x.cards.first().unwrap().suit != announcement.cards.first().unwrap().suit
+                });
+                continue;
+            }
+
             if !player.borrow().has_announcable(&announcement) {
                 player.borrow_mut().announcable.push(announcement.clone());
                 self.notify_priv(id.clone(), PrivateEvent::CanAnnounce(announcement));
@@ -741,6 +779,10 @@ impl SchnapsenDuo {
             }
         };
 
+        for announcement in won.borrow_mut().announcements.iter_mut() {
+            announcement.fullified = true;
+        }
+
         let won_id = won.borrow().id.clone();
         self.notify_pub(PublicEvent::Trick {
             user_id: won_id.clone(),
@@ -770,7 +812,7 @@ impl SchnapsenDuo {
                         .announcements
                         .iter()
                         .map(|a| {
-                            if player.tricks.len() > 0 {
+                            if a.fullified {
                                 a.announce_type.clone() as u8
                             } else {
                                 0 as u8
@@ -788,6 +830,11 @@ impl SchnapsenDuo {
         self.notify_pub(PublicEvent::Score {
             user_id: winner.borrow().id.clone(),
             points: max_points,
+        });
+
+        self.notify_pub(PublicEvent::Score {
+            user_id: loser.borrow().id.clone(),
+            points: min_points,
         });
 
         if max_points < 66 {
@@ -875,31 +922,11 @@ impl SchnapsenDuo {
             })
     }
 
-    fn update_playable_cards(
+    fn notify_changes_playable_cards(
         &self,
         player: Rc<RefCell<Player>>,
+        playable: &[Card],
     ) -> Vec<tokio::task::JoinHandle<()>> {
-        let mut playable = 'inner: {
-            if !self.stack.is_empty() && self.taken_trump.is_some() {
-                break 'inner player
-                    .borrow()
-                    .cards
-                    .iter()
-                    .filter(|card| {
-                        card.suit == self.stack.first().unwrap().suit.clone()
-                            || card.suit == self.taken_trump.as_ref().unwrap().1.suit
-                    })
-                    .cloned()
-                    .collect();
-            } else {
-                break 'inner player.borrow().cards.clone();
-            }
-        };
-
-        if playable.is_empty() {
-            playable = player.borrow().cards.clone();
-        }
-
         let mut callbacks: Vec<_> = playable
             .iter()
             .filter_map(|card| {
@@ -929,8 +956,36 @@ impl SchnapsenDuo {
             None
         }));
 
-        player.borrow_mut().playable_cards = playable;
+        player.borrow_mut().playable_cards = playable.to_vec();
         callbacks.into_iter().flatten().collect()
+    }
+
+    fn update_playable_cards(
+        &self,
+        player: Rc<RefCell<Player>>,
+    ) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut playable = 'inner: {
+            if !self.stack.is_empty() && self.taken_trump.is_some() {
+                break 'inner player
+                    .borrow()
+                    .cards
+                    .iter()
+                    .filter(|card| {
+                        card.suit == self.stack.first().unwrap().suit.clone()
+                            || card.suit == self.taken_trump.as_ref().unwrap().1.suit
+                    })
+                    .cloned()
+                    .collect();
+            } else {
+                break 'inner player.borrow().cards.clone();
+            }
+        };
+
+        if playable.is_empty() {
+            playable = player.borrow().cards.clone();
+        }
+
+        self.notify_changes_playable_cards(player, &playable)
     }
 
     fn take_trump(&mut self, player: Rc<RefCell<Player>>) {
@@ -941,6 +996,7 @@ impl SchnapsenDuo {
 
         player.borrow_mut().cards.push(taken_trump.1.clone());
 
+        self.notify_pub(PublicEvent::TrumpChange(None));
         // TODO: Everything after this line should be consolidated into a function, as it is also needed in self.draw_card
         self.notify_pub(PublicEvent::DeckCardCount(self.deck.len()));
         self.notify_priv(

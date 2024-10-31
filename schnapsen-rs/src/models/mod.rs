@@ -49,7 +49,7 @@ pub struct Player {
     pub playable_cards: Vec<Card>,
     pub tricks: Vec<[Card; 2]>,
     pub announcements: Vec<Announcement>,
-    pub announcable: Vec<Announcement>,
+    pub announcable: Vec<AnnouncementProposal>,
     pub possible_trump_swap: Option<Card>,
     pub points: u8,
 }
@@ -89,12 +89,12 @@ impl Player {
         announced.into_iter().any(|x| x == cards)
     }
 
-    pub fn has_announcable(&self, announcement: &Announcement) -> bool {
+    pub fn has_announcable(&self, announcement: &AnnouncementProposal) -> bool {
         has_announcable(&self.announcable, announcement)
     }
 }
 
-pub fn has_announcable(data: &[Announcement], check: &Announcement) -> bool {
+pub fn has_announcable(data: &[AnnouncementProposal], check: &AnnouncementProposal) -> bool {
     data.iter().any(|proposed| 
         proposed.announce_type == check.announce_type
             && proposed.cards.first().unwrap().suit == check.cards.first().unwrap().suit
@@ -122,6 +122,32 @@ impl Hash for Player {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Announcement {
+    pub cards: [Card; 2],
+    pub announce_type: AnnounceType,
+    pub fullified: bool,
+}
+
+impl From<AnnouncementProposal> for Announcement {
+    fn from(proposal: AnnouncementProposal) -> Self {
+        Announcement {
+            cards: proposal.cards,
+            announce_type: proposal.announce_type,
+            fullified: false,
+        }
+    }
+}
+
+impl From<Announcement> for AnnouncementProposal {
+    fn from(announcement: Announcement) -> Self {
+        AnnouncementProposal {
+            cards: announcement.cards,
+            announce_type: announcement.announce_type,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct AnnouncementProposal {
     pub cards: [Card; 2],
     pub announce_type: AnnounceType,
 }
