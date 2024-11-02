@@ -156,7 +156,10 @@ impl<'a> Performer<'a> {
         player: Rc<RefCell<schnapsen_rs::models::Player>>,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
-        Err(PerformerError::CallError) // TODO: Implement function
+        if let SchnapsenDuoActions::CloseTalon = action {
+            return Ok(instance.lock().unwrap().close_talon(player)?);
+        }
+        Err(PerformerError::CallError)
     }
 
     fn announce_20(
