@@ -99,6 +99,7 @@ pub enum PrivateEvent {
     AllowPlayCard,
     AllowDrawCard,
     AllowAnnounce,
+    AllowCloseTalon
 }
 
 // TODO: Alle user_ids are currently serialized as the write-tokens. This has to be changed. SECURITY RISK
@@ -286,6 +287,7 @@ impl SchnapsenDuo {
             if new.announcable.len() > 0 {
                 self.notify_priv(new.id.clone(), PrivateEvent::AllowAnnounce);
             }
+            self.notify_priv(new.id.clone(), PrivateEvent::AllowCloseTalon);
             self.notify_priv(new.id.clone(), PrivateEvent::AllowPlayCard);
         }
         Ok(())
@@ -850,8 +852,8 @@ impl SchnapsenDuo {
 
         self.swap_to(won.clone());
 
-        if !self.deck.is_empty() {
-            self.notify_priv(won_id, PrivateEvent::AllowDrawCard);
+        if !self.deck.is_empty() && self.closed_talon.is_none() {
+            self.notify_priv(won_id.clone(), PrivateEvent::AllowDrawCard);
         } else {
             self.notify_priv(won_id, PrivateEvent::AllowPlayCard);
         }
@@ -878,8 +880,8 @@ impl SchnapsenDuo {
             })
             .zip(self.players.iter());
 
-        let (max_points, winner) = points.clone().max_by_key(|(points, _)| *points).unwrap();
-        let (min_points, loser) = points.min_by_key(|(points, _)| *points).unwrap();
+        let (mut max_points, mut winner) = points.clone().max_by_key(|(points, _)| *points).unwrap();
+        let (mut min_points, mut loser) = points.min_by_key(|(points, _)| *points).unwrap();
 
         self.notify_pub(PublicEvent::Score {
             user_id: winner.borrow().id.clone(),
@@ -892,7 +894,22 @@ impl SchnapsenDuo {
         });
 
         if max_points < 66 {
-            return Ok(());
+            if self.players.iter().any(|player| player.borrow().cards.len() == 0) {
+                max_points += min_points;
+                min_points = 0;
+
+                if let Some(ref player) = self.closed_talon {
+                    max_points += 10;
+
+                    if Rc::ptr_eq(&player, winner) {
+                        std::mem::swap(&mut winner, &mut loser);
+                    }
+                } else if !Rc::ptr_eq(&won, winner) {
+                    std::mem::swap(&mut winner,&mut loser);
+                }
+            } else {
+                return Ok(());
+            }
         }
 
         let points;
