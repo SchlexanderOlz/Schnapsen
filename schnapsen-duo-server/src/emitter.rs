@@ -15,6 +15,7 @@ pub fn to_private_event_emitter<'a>(
         PrivateEvent::AllowDrawCard => "allow_draw_card",
         PrivateEvent::AllowPlayCard => "allow_play_card",
         PrivateEvent::AllowAnnounce => "allow_announce",
+        PrivateEvent::AllowCloseTalon => "allow_close_talon",
         PrivateEvent::CannotAnnounce(_) => "cannot_announce",
         PrivateEvent::TrumpChangeImpossible(_) => "trump_change_impossible", 
     };
