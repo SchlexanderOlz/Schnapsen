@@ -104,17 +104,19 @@ fn setup_read_ns(
     socket.on("auth", move |Data(data): Data<String>| {
         debug!("Authenticating: {:?} at Game: {:?}", data, read);
 
-        tokio::task::spawn_local(async move {
-            setup_private_access(&data.clone(), instance.clone(), socket_clone.clone()).await;
+        tokio::task::spawn_blocking(move || {
+            Handle::current().block_on(async {
+                setup_private_access(&data.clone(), instance.clone(), socket_clone.clone()).await;
+            });
             debug!("Authenticated: {:?} at Game: {:?}", data, read);
 
             let mut lock = instance.lock().unwrap();
             lock.on_pub_event(move |event| {
 
-            Handle::current().block_on(async {
-                emitter::to_public_event_emitter(&event)(socket_clone.lock().await.to(PUBLIC_EVENT_ROOM))
-                    .unwrap()
-            })
+                Handle::current().block_on(async {
+                    emitter::to_public_event_emitter(&event)(socket_clone.lock().await.to(PUBLIC_EVENT_ROOM))
+                        .unwrap()
+                })
             });
             connected.lock().unwrap().push(data.clone());
             if connected.lock().unwrap().len() == write_len {
