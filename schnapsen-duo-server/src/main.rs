@@ -1,9 +1,3 @@
-use std::{
-    future,
-    hash::{Hash, Hasher},
-    sync::{Arc, Mutex},
-};
-use tokio::{runtime::Handle, sync};
 use axum::{self, routing};
 use listener::MatchCreated;
 use schnapsen_rs::SchnapsenDuo;
@@ -11,6 +5,12 @@ use socketioxide::{
     extract::{Data, SocketRef},
     SocketIo,
 };
+use std::{
+    future,
+    hash::{Hash, Hasher},
+    sync::{Arc, Mutex},
+};
+use tokio::{runtime::Handle, sync};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -22,7 +22,11 @@ mod translator;
 
 const PUBLIC_EVENT_ROOM: &str = "public-events";
 
-async fn setup_private_access(player_id: &str, instance: Arc<Mutex<SchnapsenDuo>>, socket: Arc<tokio::sync::Mutex<SocketRef>>) {
+fn setup_private_access(
+    player_id: &str,
+    instance: Arc<Mutex<SchnapsenDuo>>,
+    socket: Arc<tokio::sync::Mutex<SocketRef>>,
+) {
     let player = instance.lock().unwrap().get_player(player_id).unwrap();
 
     debug!("Got player: {:?}", player.borrow().id);
@@ -33,20 +37,27 @@ async fn setup_private_access(player_id: &str, instance: Arc<Mutex<SchnapsenDuo>
         .unwrap()
         .on_priv_event(player.clone(), move |event| {
             Handle::current().block_on(async {
-            emitter::to_private_event_emitter(&event)(socket_clone.lock().await.clone()).unwrap()
+                emitter::to_private_event_emitter(&event)(socket_clone.lock().await.clone())
+                    .unwrap()
             })
         });
 
-    let translator = translator::SchnapsenDuoTranslator::listen(socket.clone()).await;
     let player_id_clone = player_id.to_string();
-    translator.on_event(move |action| {
-        let performer = performer::Performer::new(player_id_clone.clone(), instance.clone());
-        let res = performer.perform(action);
-        if res.is_err() {
-            Handle::current().block_on(async {
-            socket.lock().await.emit("error", res.unwrap_err().to_string()).unwrap();
-            })
-        }
+    tokio::task::spawn(async move {
+        let translator = translator::SchnapsenDuoTranslator::listen(socket.clone()).await;
+        translator.on_event(move |action| {
+            let performer = performer::Performer::new(player_id_clone.clone(), instance.clone());
+            let res = performer.perform(action);
+            if res.is_err() {
+                Handle::current().block_on(async {
+                    socket
+                        .lock()
+                        .await
+                        .emit("error", res.unwrap_err().to_string())
+                        .unwrap();
+                })
+            }
+        });
     });
 }
 
@@ -70,7 +81,8 @@ fn setup_new_match(
     let read = hasher.finish();
 
     let public_url = std::env::var("PUBLIC_ADDR").expect("SCHNAPSEN_DUO_PUBLIC_ADDR must be set");
-    let private_url = std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
+    let private_url =
+        std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
 
     async move {
         io.ns(format!("/{read}"), move |socket: SocketRef| {
@@ -85,7 +97,7 @@ fn setup_new_match(
                 .collect(),
             read: read.to_string(),
             url_pub: public_url,
-            url_priv: private_url
+            url_priv: private_url,
         }
     }
 }
@@ -105,17 +117,16 @@ fn setup_read_ns(
         debug!("Authenticating: {:?} at Game: {:?}", data, read);
 
         tokio::task::spawn_blocking(move || {
-            Handle::current().block_on(async {
-                setup_private_access(&data.clone(), instance.clone(), socket_clone.clone()).await;
-            });
+            setup_private_access(&data.clone(), instance.clone(), socket_clone.clone());
             debug!("Authenticated: {:?} at Game: {:?}", data, read);
 
             let mut lock = instance.lock().unwrap();
             lock.on_pub_event(move |event| {
-
                 Handle::current().block_on(async {
-                    emitter::to_public_event_emitter(&event)(socket_clone.lock().await.to(PUBLIC_EVENT_ROOM))
-                        .unwrap()
+                    emitter::to_public_event_emitter(&event)(
+                        socket_clone.lock().await.to(PUBLIC_EVENT_ROOM),
+                    )
+                    .unwrap()
                 })
             });
             connected.lock().unwrap().push(data.clone());
@@ -148,7 +159,9 @@ async fn main() {
 
     let on_create = move |new_match: listener::CreateMatch| setup_new_match(io.clone(), new_match);
 
-    let router = listener::listen(router, on_create).layer(CorsLayer::new().allow_origin(Any)).route("/", routing::get(|| async {}));
+    let router = listener::listen(router, on_create)
+        .layer(CorsLayer::new().allow_origin(Any))
+        .route("/", routing::get(|| async {}));
     info!("Listening on {}", host_url);
     axum::serve(listener, router).await.unwrap();
 }
