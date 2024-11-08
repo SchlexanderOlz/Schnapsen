@@ -3,7 +3,7 @@ use std::{
     hash::{Hash, Hasher},
     sync::{Arc, Mutex},
 };
-
+use tokio::{runtime::Handle, sync};
 use axum::{self, routing};
 use listener::MatchCreated;
 use schnapsen_rs::SchnapsenDuo;
@@ -22,7 +22,7 @@ mod translator;
 
 const PUBLIC_EVENT_ROOM: &str = "public-events";
 
-fn setup_private_access(player_id: &str, instance: Arc<Mutex<SchnapsenDuo>>, socket: SocketRef) {
+async fn setup_private_access(player_id: &str, instance: Arc<Mutex<SchnapsenDuo>>, socket: Arc<tokio::sync::Mutex<SocketRef>>) {
     let player = instance.lock().unwrap().get_player(player_id).unwrap();
 
     debug!("Got player: {:?}", player.borrow().id);
@@ -32,16 +32,20 @@ fn setup_private_access(player_id: &str, instance: Arc<Mutex<SchnapsenDuo>>, soc
         .lock()
         .unwrap()
         .on_priv_event(player.clone(), move |event| {
-            emitter::to_private_event_emitter(&event)(socket_clone.clone()).unwrap()
+            Handle::current().block_on(async {
+            emitter::to_private_event_emitter(&event)(socket_clone.lock().await.clone()).unwrap()
+            })
         });
 
-    let translator = translator::SchnapsenDuoTranslator::listen(socket.clone());
+    let translator = translator::SchnapsenDuoTranslator::listen(socket.clone()).await;
     let player_id_clone = player_id.to_string();
     translator.on_event(move |action| {
         let performer = performer::Performer::new(player_id_clone.clone(), instance.clone());
         let res = performer.perform(action);
         if res.is_err() {
-            socket.emit("error", res.unwrap_err().to_string()).unwrap();
+            Handle::current().block_on(async {
+            socket.lock().await.emit("error", res.unwrap_err().to_string()).unwrap();
+            })
         }
     });
 }
@@ -94,20 +98,23 @@ fn setup_read_ns(
     write_len: usize,
 ) {
     debug!("New connection to {:?}", read);
-    let socket_clone = socket.clone();
+    let socket_clone = Arc::new(tokio::sync::Mutex::new(socket.clone()));
 
     socket.join(PUBLIC_EVENT_ROOM).unwrap();
     socket.on("auth", move |Data(data): Data<String>| {
         debug!("Authenticating: {:?} at Game: {:?}", data, read);
 
-        tokio::task::spawn_blocking(move || {
-            setup_private_access(&data.clone(), instance.clone(), socket_clone.clone());
+        tokio::task::spawn_local(async move {
+            setup_private_access(&data.clone(), instance.clone(), socket_clone.clone()).await;
             debug!("Authenticated: {:?} at Game: {:?}", data, read);
 
             let mut lock = instance.lock().unwrap();
             lock.on_pub_event(move |event| {
-                emitter::to_public_event_emitter(&event)(socket_clone.to(PUBLIC_EVENT_ROOM))
+
+            Handle::current().block_on(async {
+                emitter::to_public_event_emitter(&event)(socket_clone.lock().await.to(PUBLIC_EVENT_ROOM))
                     .unwrap()
+            })
             });
             connected.lock().unwrap().push(data.clone());
             if connected.lock().unwrap().len() == write_len {

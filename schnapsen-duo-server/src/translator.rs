@@ -99,29 +99,29 @@ where
     T: Fn(SchnapsenDuoActions) -> () + Send + 'static,
 {
     callbacks: Mutex<Vec<T>>,
-    socket: SocketRef,
+    socket: Arc<tokio::sync::Mutex<SocketRef>>,
 }
 
 impl<T> SchnapsenDuoTranslator<T>
 where
     T: Fn(SchnapsenDuoActions) -> () + Send + 'static,
 {
-    pub fn listen(socket: SocketRef) -> Arc<Self> {
+    pub async fn listen(socket: Arc<tokio::sync::Mutex<SocketRef>>) -> Arc<Self> {
         let new = Arc::new(Self {
             callbacks: Mutex::new(Vec::new()),
-            socket 
+            socket
         });
-        new.clone().init_events();
+        new.clone().init_events().await;
         debug!("Initialized events");
         new
     }
 
 
-    fn init_events(self: Arc<Self>) {
+    async fn init_events(self: Arc<Self>) {
         debug!("Initializing events");
-        let socket = self.socket.clone();
+        let socket = self.socket.lock().await.clone();
         let clone = self.clone();
-        debug!("Saus");
+
         socket.on(
             SchnapsenDuoEmptyActions::PlayCard.event_name(),
             move |Data(data): Data<Card>| async move { clone.notify(SchnapsenDuoActions::PlayCard(data))},
