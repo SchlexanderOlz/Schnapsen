@@ -1,22 +1,6 @@
 version: '3.8'
 
 services:
-  game-server:
-    build:
-      context: ./game-server
-    container_name: game-server
-    command: cargo run --release
-    ports:
-      - "5050:5050"
-    restart: on-failure
-    networks:
-      - game-night-network
-    environment:
-      - GAME_REGISTER_URL=http://games-agent:7000/register
-      - PUBLIC_ADDR=${GAME_SERVER_PUBLIC_ADDR}
-      - PRIVATE_ADDR=${GAME_SERVER_PRIVATE_ADDR}
-      - SCHNAPSEN_DUO_CREATE_URL=http://schnapsen-duo-server:6060/
-
   schnapsen-duo-server:
     build:
       context: ./schnapsen-duo-server
@@ -31,17 +15,8 @@ services:
       - HOST_ADDR=0.0.0.0:6060
       - PUBLIC_ADDR=${SCHNAPSEN_DUO_PUBLIC_ADDR}
       - PRIVATE_ADDR=${SCHNAPSEN_DUO_PRIVATE_ADDR}
-    
-  proxy:
-    image: haproxytech/haproxy-alpine:2.4
-    container_name: proxy
-    networks:
-      - game-night-network
-    volumes:
-      - "./proxy:/usr/local/etc/haproxy:ro"
-    ports:
-      - "3737:80"
-      - "8404:8404"
+      - AMQP_URL=amqp://admin:Password1@rabbitmq:5672
+      - REGION=eu-central-1
 
 networks:
   game-night-network:

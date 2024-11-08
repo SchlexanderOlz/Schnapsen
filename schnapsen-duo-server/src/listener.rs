@@ -5,28 +5,8 @@ use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 
+use crate::models::{CreateMatch, GameMode, MatchCreated};
 
-#[derive(Deserialize, Debug)]
-pub struct CreateMatch {
-    pub game: String,
-    pub players: Vec<String>,
-    pub mode: GameMode,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct GameMode {
-    pub name: String,
-    pub player_count: u32,
-    pub computer_lobby: bool,
-}
-
-#[derive(Serialize, Debug)]
-pub struct MatchCreated {
-    pub player_write: HashMap<String, String>,
-    pub read: String,
-    pub url_pub: String,
-    pub url_priv: String
-}
 
 pub fn listen<T, F>(router: axum::Router<Arc<T>>, on_create: T) -> axum::Router
 where
