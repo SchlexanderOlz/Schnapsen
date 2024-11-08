@@ -10,7 +10,6 @@ use std::{
     hash::{Hash, Hasher},
     sync::{Arc, Mutex},
 };
-use tokio::{runtime::Handle, sync};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -36,10 +35,11 @@ fn setup_private_access(
         .lock()
         .unwrap()
         .on_priv_event(player.clone(), move |event| {
-            Handle::current().block_on(async {
+            let socket_clone = socket_clone.clone();
+            tokio::task::spawn(async move {
                 emitter::to_private_event_emitter(&event)(socket_clone.lock().await.clone())
-                    .unwrap()
-            })
+                    .unwrap();
+            });
         });
 
     let player_id_clone = player_id.to_string();
@@ -49,13 +49,14 @@ fn setup_private_access(
             let performer = performer::Performer::new(player_id_clone.clone(), instance.clone());
             let res = performer.perform(action);
             if res.is_err() {
-                Handle::current().block_on(async {
+                let socket = socket.clone();
+                tokio::task::spawn(async move {
                     socket
                         .lock()
                         .await
                         .emit("error", res.unwrap_err().to_string())
                         .unwrap();
-                })
+                });
             }
         });
     });
@@ -122,12 +123,13 @@ fn setup_read_ns(
 
             let mut lock = instance.lock().unwrap();
             lock.on_pub_event(move |event| {
-                Handle::current().block_on(async {
+                let socket_clone = socket_clone.clone();
+                tokio::task::spawn(async move {
                     emitter::to_public_event_emitter(&event)(
                         socket_clone.lock().await.to(PUBLIC_EVENT_ROOM),
                     )
-                    .unwrap()
-                })
+                    .unwrap();
+                });
             });
             connected.lock().unwrap().push(data.clone());
             if connected.lock().unwrap().len() == write_len {
