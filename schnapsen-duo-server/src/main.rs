@@ -1,12 +1,15 @@
 use axum::{self, routing};
 use futures::{io::ReadToString, StreamExt};
 use lapin::{
-    options::{BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, QueueDeclareOptions, QueuePurgeOptions},
+    options::{
+        BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, QueueDeclareOptions,
+        QueuePurgeOptions,
+    },
     protocol::channel,
     types::FieldTable,
     BasicProperties,
 };
-use models::{CreateMatch, GameMode, GameServer, MatchCreated};
+use models::{CreateMatch, GameMode, GameServer, MatchCreated, MatchResult};
 use schnapsen_rs::{PublicEvent, SchnapsenDuo};
 use socketioxide::{
     extract::{Data, SocketRef},
@@ -33,10 +36,27 @@ mod performer;
 mod translator;
 
 const CREATE_MATCH_QUEUE: &str = "match-created";
+const RESULT_MATCH_QUEUE: &str = "match-result";
 const CREATE_GAME_QUEUE: &str = "game-created";
 const CREATE_MATCH_REQUEST_QUEUE: &str = "match-create-request";
 const HEALTH_CHECK_QUEUE: &str = "health-check";
 
+fn notify_match_result(channel: Arc<lapin::Channel>, result: MatchResult) {
+    debug!("Notifying match result: {:?}", result);
+    let channel = channel.clone();
+    tokio::spawn(async move {
+        channel
+            .basic_publish(
+                "",
+                RESULT_MATCH_QUEUE,
+                BasicPublishOptions::default(),
+                &serde_json::to_vec(&result).unwrap(),
+                BasicProperties::default(),
+            )
+            .await
+            .unwrap();
+    });
+}
 
 async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>) {
     info!("Listening for match create requests");
@@ -51,6 +71,15 @@ async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>
     channel
         .queue_declare(
             CREATE_MATCH_QUEUE,
+            QueueDeclareOptions::default(),
+            FieldTable::default(),
+        )
+        .await
+        .unwrap();
+
+    channel
+        .queue_declare(
+            RESULT_MATCH_QUEUE,
             QueueDeclareOptions::default(),
             FieldTable::default(),
         )
@@ -81,7 +110,32 @@ async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>
             let new_match: CreateMatch = serde_json::from_slice(&delivery.data).unwrap();
             let match_manager = on_create(new_match);
 
-            let created_match = match_manager.get_meta();
+            let created_match = match_manager.get_meta().clone();
+
+            let instance = match_manager.get_match();
+
+            {
+                let created_match = created_match.clone();
+                let channel = channel.clone();
+                instance.lock().unwrap().on_pub_event(move |event| {
+                    // TODO|POTERROR: Change this to final result
+                    if let PublicEvent::Result {
+                        winner,
+                        points,
+                        ranked,
+                    } = event
+                    {
+                        let result = MatchResult {
+                            match_id: created_match.read.clone(),
+                            winner,
+                            points,
+                            ranked,
+                        };
+
+                        notify_match_result(channel.clone(), result);
+                    }
+                });
+            };
 
             debug!("Created match: {:?}", created_match);
             channel
@@ -162,7 +216,10 @@ async fn register_server(
     while let Some(delivery) = consumer.next().await {
         let delivery = delivery.unwrap();
         let server_id = std::string::String::from_utf8(delivery.data).unwrap();
-        channel.queue_purge(reply_to.name().as_str(), QueuePurgeOptions::default()).await.unwrap();
+        channel
+            .queue_purge(reply_to.name().as_str(), QueuePurgeOptions::default())
+            .await
+            .unwrap();
         return Ok(server_id);
     }
     Err("No server id was received".into())

@@ -13,7 +13,7 @@ pub struct GameServer {
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameMode {
     pub name: String,
     pub player_count: u32,
@@ -30,7 +30,7 @@ pub struct CreateMatch {
 
 
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct MatchCreated {
     pub player_write: HashMap<String, String>,
     pub game: String,
@@ -45,4 +45,12 @@ pub struct MatchCreated {
 pub struct Timeout {
     pub user_id: String,
     pub reason: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct MatchResult {
+    pub match_id: String,
+    pub winner: String,
+    pub points: u8,
+    pub ranked: HashMap<String, u8>,
 }

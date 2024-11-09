@@ -91,8 +91,13 @@ impl WriteMatchManager {
     }
 
     #[inline]
-    pub fn get_meta(&self) -> &MatchCreated {
-        &self.meta
+    pub fn get_meta(&self) -> MatchCreated {
+        self.meta.clone()
+    }
+
+    #[inline]
+    pub fn get_match(&self) -> Arc<std::sync::Mutex<SchnapsenDuo>> {
+        self.instance.clone()
     }
 
     fn wait_for_move(self: Arc<Self>, player_id: String) {
@@ -215,10 +220,12 @@ impl WriteMatchManager {
                 let res = performer.perform(action);
                 if res.is_err() {
                     let socket = socket.clone();
+                    tokio::task::block_in_place(|| {
                     socket
                         .blocking_lock()
                         .emit("error", res.unwrap_err().to_string())
                         .unwrap();
+                    });
                 }
             });
         });
