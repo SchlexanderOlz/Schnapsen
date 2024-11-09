@@ -119,7 +119,7 @@ where
 
     async fn init_events(self: Arc<Self>) {
         debug!("Initializing events");
-        let socket = self.socket.lock().await.clone();
+        let socket = self.socket.lock().await;
         let clone = self.clone();
 
         socket.on(

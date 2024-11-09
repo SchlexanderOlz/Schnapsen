@@ -17,7 +17,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 pub mod models;
-mod scheduler;
 
 #[derive(Debug)]
 pub enum PlayerError {
@@ -223,6 +222,24 @@ impl SchnapsenDuo {
     #[inline]
     pub fn on_pub_event(&mut self, callback: impl Fn(PublicEvent) -> () + Send + Sync + 'static) {
         self.pub_callbacks.push(Arc::new(callback));
+    }
+
+    #[inline]
+    pub fn off_pub_event(&mut self, callback: impl Fn(PublicEvent) -> () + Send + Sync + 'static) {
+        let callback = Arc::new(callback) as Arc<dyn Fn(PublicEvent) -> () + Send + Sync + 'static>;
+        self.pub_callbacks.retain(|x| !Arc::ptr_eq(x, &callback));
+    }
+
+    #[inline]
+    pub fn off_priv_event(
+        &mut self,
+        player: Rc<RefCell<Player>>,
+        callback: impl Fn(PrivateEvent) -> () + Send + Sync + 'static,
+    ) {
+        let callback = Arc::new(callback) as Arc<dyn Fn(PrivateEvent) -> () + Send + Sync + 'static>;
+        if let Some(callbacks) = self.priv_callbacks.get_mut(&player.borrow().id) {
+            callbacks.retain(|x| !Arc::ptr_eq(x, &callback));
+        }
     }
 
     pub fn get_player(&self, player_id: &str) -> Option<Rc<RefCell<Player>>> {

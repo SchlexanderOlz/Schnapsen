@@ -40,3 +40,9 @@ pub struct MatchCreated {
     pub url_priv: String,
     pub region: String,
 }
+
+#[derive(Serialize, Debug, Clone)]
+pub struct Timeout {
+    pub user_id: String,
+    pub reason: String,
+}
