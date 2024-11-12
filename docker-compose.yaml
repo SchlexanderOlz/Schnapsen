@@ -15,8 +15,8 @@ services:
       - HOST_ADDR=0.0.0.0:6060
       - PUBLIC_ADDR=${SCHNAPSEN_DUO_PUBLIC_ADDR}
       - PRIVATE_ADDR=${SCHNAPSEN_DUO_PRIVATE_ADDR}
-      - AMQP_URL=amqp://admin:Password1@rabbitmq:5672
-      - REGION=eu-central-1
+      - AMQP_URL=${AMQP_URL}
+      - REGION=${REGION}
 
 networks:
   game-night-network:
