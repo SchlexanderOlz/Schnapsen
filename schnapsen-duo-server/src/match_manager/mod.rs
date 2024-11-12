@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
-    sync::{atomic::AtomicI8, Arc, RwLock},
+    sync::{atomic::{AtomicBool, AtomicI8}, Arc, RwLock},
     time::Duration,
 };
 
@@ -35,6 +35,7 @@ pub struct WriteMatchManager {
     match_id: String,
     write_connected: std::sync::RwLock<HashMap<String, Vec<Arc<tokio::sync::Mutex<SocketRef>>>>>,
     exited: AtomicI8,
+    started: AtomicBool
 }
 
 impl WriteMatchManager {
@@ -77,6 +78,7 @@ impl WriteMatchManager {
             match_id: read.to_string(),
             write_connected: RwLock::new(HashMap::new()),
             exited: AtomicI8::new(0),
+            started: AtomicBool::new(false),
         });
 
         {
@@ -220,9 +222,10 @@ impl WriteMatchManager {
                 let res = performer.perform(action);
                 if res.is_err() {
                     let socket = socket.clone();
-                    tokio::task::block_in_place(|| {
+                    tokio::task::spawn(async move {
                     socket
-                        .blocking_lock()
+                        .lock()
+                        .await
                         .emit("error", res.unwrap_err().to_string())
                         .unwrap();
                     });
@@ -278,7 +281,7 @@ impl WriteMatchManager {
                 });
             });
 
-            if self.write_connected.read().unwrap().len() == self.meta.player_write.len() {
+            if self.write_connected.read().unwrap().len() == self.meta.player_write.len() && !self.started.load(std::sync::atomic::Ordering::SeqCst) {
                 self.start_match(data);
             };
         });
@@ -290,6 +293,7 @@ impl WriteMatchManager {
         let active_player = lock.get_player(&begin_player_id);
         lock.set_active_player(active_player.unwrap()).unwrap();
         lock.distribute_cards().unwrap();
+        self.started.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn setup_read_ns(self: Arc<Self>, socket: SocketRef) {
