@@ -215,6 +215,8 @@ async fn register_server(
 
     while let Some(delivery) = consumer.next().await {
         let delivery = delivery.unwrap();
+        delivery.ack(BasicAckOptions::default()).await.expect("ack");
+
         let server_id = std::string::String::from_utf8(delivery.data).unwrap();
         channel
             .queue_purge(reply_to.name().as_str(), QueuePurgeOptions::default())
