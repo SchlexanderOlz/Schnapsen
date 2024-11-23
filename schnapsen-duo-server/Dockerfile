@@ -1,7 +1,7 @@
 FROM rust:latest
 
 WORKDIR /usr/schnapsen-duo-server
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 
 RUN cargo build --release
 
