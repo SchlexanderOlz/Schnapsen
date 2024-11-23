@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use schnapsen_rs::SchnapsenDuo;
+use schnapsen_rs::{client::SchnapsenDuoClient, SchnapsenDuo};
 use thiserror::Error;
 use tracing::debug;
 
@@ -26,8 +26,7 @@ pub enum PerformerError {
 
 type PerformerFunction<'a> = Box<
     dyn Fn(
-            Arc<Mutex<SchnapsenDuo>>,
-            Rc<RefCell<schnapsen_rs::models::Player>>,
+            &SchnapsenDuoClient,
             SchnapsenDuoActions,
         ) -> Result<(), PerformerError>
         + Send
@@ -36,8 +35,7 @@ type PerformerFunction<'a> = Box<
 >;
 
 pub struct Performer<'a> {
-    instance: Arc<Mutex<SchnapsenDuo>>,
-    player: Rc<RefCell<schnapsen_rs::models::Player>>,
+    client: SchnapsenDuoClient,
     functions: HashMap<SchnapsenDuoEmptyActions, PerformerFunction<'a>>,
 }
 
@@ -86,10 +84,11 @@ impl<'a> Performer<'a> {
             .unwrap()
             .get_player(player_id.as_str())
             .unwrap();
+        
+        let client = SchnapsenDuoClient::new(player.clone(), instance.clone());
 
         Self {
-            player,
-            instance,
+            client,
             functions,
         }
     }
@@ -98,115 +97,105 @@ impl<'a> Performer<'a> {
         debug!(
             "Performing action: {:?} by player: {:?}",
             action,
-            self.player.borrow().id
+            self.client.get_player_id()
         );
         let res = self.functions.get(&action.clone().into()).unwrap()(
-            self.instance.clone(),
-            self.player.clone(),
+            &self.client,
             action.clone(),
         );
         if res.is_err() {
             debug!(
                 "Error performing action: {:?} by player: {:?}",
                 action,
-                self.player.borrow().id
+                self.client.get_player_id()
             );
         } else {
             debug!(
                 "Successfully performed action: {:?} by player: {:?}",
                 action,
-                self.player.borrow().id
+                self.client.get_player_id()
             );
         }
         res
     }
 
     fn play_card(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
         if let SchnapsenDuoActions::PlayCard(card) = action {
-            return Ok(instance.lock().unwrap().play_card(player, card)?);
+            return Ok(client.play_card(card)?);
         }
         Err(PerformerError::CallError)
     }
 
     fn quit(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
         Err(PerformerError::CallError) // TODO: Implement function
     }
 
     fn swap_trump(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
         if let SchnapsenDuoActions::SwapTrump(card) = action {
-            return Ok(instance.lock().unwrap().swap_trump(player, card)?);
+            return Ok(client.swap_trump(card)?);
         }
         Err(PerformerError::CallError)
     }
 
     fn close_talon(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
         if let SchnapsenDuoActions::CloseTalon = action {
-            return Ok(instance.lock().unwrap().close_talon(player)?);
+            return Ok(client.close_talon()?);
         }
         Err(PerformerError::CallError)
     }
 
     fn announce_20(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
         if let SchnapsenDuoActions::Announce20(cards) = action {
-            return Ok(instance.lock().unwrap().announce_20(player, cards)?);
+            return Ok(client.announce_20(cards)?);
         }
         Err(PerformerError::CallError)
     }
 
     fn announce_40(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
-        Ok(instance.lock().unwrap().announce_40(player)?)
+        Ok(client.announce_40()?)
     }
 
     fn draw_card(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
-        Ok(instance.lock().unwrap().draw_card_after_trick(player)?)
+        Ok(client.draw_card()?)
     }
 
     fn cutt_deck(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
         if let SchnapsenDuoActions::CuttDeck(idx) = action {
-            return Ok(instance.lock().unwrap().cutt_deck(player, idx)?);
+            return Ok(client.cutt_deck(idx)?);
         }
         Err(PerformerError::CallError)
     }
 
     fn take_cards(
-        instance: Arc<Mutex<SchnapsenDuo>>,
-        player: Rc<RefCell<schnapsen_rs::models::Player>>,
+        client: &SchnapsenDuoClient,
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
         if let SchnapsenDuoActions::TakeCards(cards) = action {
-            return Ok(instance.lock().unwrap().take_cards_til(player, cards)?); // TODO: This might lead to concurrency issues
+            return Ok(client.take_cards_til(cards)?); // TODO: This might lead to concurrency issues
         }
         Err(PerformerError::CallError)
     }

@@ -29,7 +29,6 @@ use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod emitter;
-mod listener;
 mod match_manager;
 mod models;
 mod performer;

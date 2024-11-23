@@ -86,9 +86,7 @@ impl WriteMatchManager {
 
         {
             let new = new.clone();
-            io.ns(format!("/{read}"), move |socket: SocketRef| {
-                new.setup_read_ns(socket);
-            });
+            io.ns(format!("/{read}"), move |socket: SocketRef| new.setup_read_ns(socket));
         }
 
         // TODO: The created match should be added to some active-state
@@ -198,13 +196,14 @@ impl WriteMatchManager {
 
         let player = self.instance.lock().unwrap().get_player(player_id).unwrap();
 
-        debug!("Got player: {:?}", player.borrow().id);
+        debug!("Got player: {:?}", player.read().unwrap().id);
 
         let socket_clone = socket.clone();
         self.instance
             .lock()
             .unwrap()
             .on_priv_event(player.clone(), move |event| {
+                debug!("Got private event: {:?}", event);
                 let socket_clone = socket_clone.clone();
                 tokio::task::spawn(async move {
                     if let Err(err) =
@@ -222,34 +221,36 @@ impl WriteMatchManager {
 
         let disconnect_socket = socket.clone();
         let match_manager = self.clone();
-        tokio::task::spawn(async move {
-            let translator = translator::SchnapsenDuoTranslator::listen(socket.clone()).await;
-            translator.on_event(move |action| {
-                if match_manager
-                    .exited
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                    > 0
-                {
-                    return;
-                }
 
-                let performer =
-                    performer::Performer::new(player_id_clone.clone(), instance.clone());
-                let res = performer.perform(action);
-                if res.is_err() {
-                    let socket = socket.clone();
-                    tokio::task::spawn(async move {
-                        socket
-                            .lock()
-                            .await
-                            .emit("error", res.unwrap_err().to_string())
-                            .unwrap();
-                    });
-                }
-            });
+        let translator = translator::SchnapsenDuoTranslator::listen(socket.clone()).await;
+
+        let performer = performer::Performer::new(player_id_clone.clone(), instance.clone());
+        translator.on_event(move |action| {
+            debug!("Got action: {:?}", action);
+            if match_manager
+                .exited
+                .load(std::sync::atomic::Ordering::SeqCst)
+                > 0
+            {
+                return;
+            }
+
+
+            let res = performer.perform(action);
+            if res.is_err() {
+                let socket = socket.clone();
+                tokio::task::spawn(async move {
+                    socket
+                        .lock()
+                        .await
+                        .emit("error", res.unwrap_err().to_string())
+                        .unwrap();
+                });
+            }
         });
 
-        self.handle_disconnect(disconnect_socket, player_id.to_string()).await;
+        self.handle_disconnect(disconnect_socket, player_id.to_string())
+            .await;
     }
 
     async fn handle_disconnect(
@@ -257,7 +258,6 @@ impl WriteMatchManager {
         socket: Arc<tokio::sync::Mutex<SocketRef>>,
         player_id: String,
     ) {
-        let player_id = player_id.to_string();
         socket.lock().await.on_disconnect(
             move |disconnected: SocketRef, reason: DisconnectReason| {
                 debug!("Player: {:?} disconnected", player_id);
@@ -298,12 +298,12 @@ impl WriteMatchManager {
         let socket_clone = Arc::new(tokio::sync::Mutex::new(socket.clone()));
 
         socket.join(PUBLIC_EVENT_ROOM).unwrap();
-        socket.on("auth", move |Data(data): Data<String>| {
-            async move {
+        socket.on("auth", move |Data(data): Data<String>| async move {
             debug!("Authenticating: {:?} at Game: {:?}", data, self.match_id);
 
             self.clone()
-                .setup_private_access(&data.clone(), socket_clone.clone()).await;
+                .setup_private_access(&data.clone(), socket_clone.clone())
+                .await;
             debug!("Authenticated: {:?} at Game: {:?}", data, self.match_id);
 
             self.instance.lock().unwrap().on_pub_event(move |event| {
@@ -321,8 +321,6 @@ impl WriteMatchManager {
             {
                 self.start_match(data);
             };
-
-        }
         });
     }
 
@@ -336,9 +334,9 @@ impl WriteMatchManager {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn setup_read_ns(self: Arc<Self>, socket: SocketRef) {
+    async fn setup_read_ns(self: Arc<Self>, socket: SocketRef) {
         debug!("New connection to {:?}", self.match_id);
 
-        self.handle_auth(socket);
+        self.handle_auth(socket).await;
     }
 }

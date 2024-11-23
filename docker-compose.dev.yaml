@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  schnapsen-duo-server:
+    build:
+      context: ./schnapsen-duo-server
+      dockerfile: Dockerfile.dev
+    container_name: schnapsen-duo-server
+    command: cargo run --release
+    volumes:
+      - ./schnapsen-rs:/usr/schnapsen-rs
+    ports:
+      - "6060:6060"
+    restart: on-failure
+    networks:
+      - game-night-network
+    environment:
+      - HOST_ADDR=0.0.0.0:6060
+      - PUBLIC_ADDR=${SCHNAPSEN_DUO_PUBLIC_ADDR}
+      - PRIVATE_ADDR=${SCHNAPSEN_DUO_PRIVATE_ADDR}
+      - AMQP_URL=${AMQP_URL}
+      - REGION=${REGION}
+
+networks:
+  game-night-network:
+    external: true
+    driver: bridge

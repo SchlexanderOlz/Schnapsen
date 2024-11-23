@@ -124,7 +124,7 @@ where
 
         socket.on(
             SchnapsenDuoEmptyActions::PlayCard.event_name(),
-            move |Data(data): Data<Card>| async move { clone.notify(SchnapsenDuoActions::PlayCard(data))},
+            move |Data(data): Data<Card>| clone.notify(SchnapsenDuoActions::PlayCard(data)),
         );
         debug!("Initialized play_card");
         let clone = self.clone();
@@ -171,6 +171,7 @@ where
     }
 
     fn notify(&self, action: SchnapsenDuoActions) {
+        debug!("Notifying callbacks of action: {:?}", action);
         for callback in self.callbacks.lock().unwrap().iter() {
             callback(action.clone());
         }
