@@ -5,7 +5,7 @@ services:
     build:
       context: ./schnapsen-duo-server
     container_name: schnapsen-duo-server
-    command: cargo run --release
+    command: schnapsen-duo-server
     ports:
       - "6060:6060"
     restart: on-failure
