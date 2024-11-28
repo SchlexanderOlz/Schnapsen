@@ -513,8 +513,8 @@ impl SchnapsenDuo {
     }
 
     pub fn swap_trump(&mut self, player: &Player, card: Card) -> Result<Card, PlayerError> {
-        if let Some(pos) = self.can_swap_trump(player) {
-            if player.cards[pos] != card {
+        if let Some(swap) = self.can_swap_trump(player) {
+            if *swap != card {
                 return Err(PlayerError::CantSwapTrump);
             }
             let trump = self.trump.take().unwrap();
@@ -767,7 +767,7 @@ impl SchnapsenDuo {
         let can_swap = player.possible_trump_swap.is_some();
         let id = player.id.clone();
         if let Some(swap) = self.can_swap_trump(player) {
-            let card = player.cards[swap].clone();
+            let card = swap.clone();
             if can_swap {
                 return (callbacks, Some(card));
             }
@@ -1048,7 +1048,7 @@ impl SchnapsenDuo {
         self.make_active(winner.clone());
     }
 
-    fn can_swap_trump(&self, player: &Player) -> Option<usize> {
+    fn can_swap_trump<'a>(&self, player: &'a Player) -> Option<&'a Card> {
         if self.active.is_none()
             || self.trump.is_none()
             || !self.is_active(player)
@@ -1058,7 +1058,7 @@ impl SchnapsenDuo {
             return None;
         }
 
-        player.cards.iter().position(|card| {
+        player.cards.iter().find(|card| {
             card.suit == self.trump.as_ref().unwrap().suit && card.value == models::CardVal::Jack
         })
     }

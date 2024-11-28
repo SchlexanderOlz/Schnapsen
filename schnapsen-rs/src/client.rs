@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
-    models::{Announcement, Card, Player}, PlayerError, SchnapsenDuo
+    models::{Announcement, Card, Player},
+    PlayerError, SchnapsenDuo,
 };
 
 pub struct SchnapsenDuoClient {
@@ -81,6 +82,13 @@ impl SchnapsenDuoClient {
             .unwrap()
             .playable_cards
             .retain(|x| *x != card);
+
+        let instance_lock = self.instance.lock().unwrap();
+
+        instance_lock.update_announcable_props(self.player.clone());
+        instance_lock.run_swap_trump_check(self.player.clone());
+        instance_lock.update_playable_cards(self.player.clone());
+
         Ok(())
     }
 
@@ -134,10 +142,10 @@ impl SchnapsenDuoClient {
     // NOTE: Calls like these directly on the instance are not recommended as they modify the player object. This should rather be done directly in this class.
     fn announce_state_changes(&self, announcement: Announcement) -> Result<(), PlayerError> {
         let mut instance_lock = self.instance.lock().unwrap();
-        instance_lock.notify_changes_playable_cards(&self.player.read().unwrap(), &announcement.cards);
+        instance_lock
+            .notify_changes_playable_cards(&self.player.read().unwrap(), &announcement.cards);
         instance_lock.update_announcable_props(self.player.clone());
         instance_lock.update_finish_round(self.player.clone())?;
         Ok(())
     }
 }
-
