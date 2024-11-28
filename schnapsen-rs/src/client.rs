@@ -46,9 +46,10 @@ impl SchnapsenDuoClient {
 
         let instance_lock = self.instance.lock().unwrap();
 
-        instance_lock.update_announcable_props(self.player.clone());
-        instance_lock.run_swap_trump_check(self.player.clone());
-        instance_lock.update_playable_cards(self.player.clone());
+        let mut player_lock = self.player.write().unwrap();
+        instance_lock.update_announcable_props(&mut player_lock);
+        instance_lock.run_swap_trump_check(&mut player_lock);
+        instance_lock.update_playable_cards(&mut player_lock);
 
         Ok(())
     }
@@ -72,22 +73,34 @@ impl SchnapsenDuoClient {
     }
 
     pub fn play_card(&self, card: crate::Card) -> Result<(), crate::PlayerError> {
-        self.instance
-            .lock()
-            .unwrap()
+        let mut instance_lock = self.instance.lock().unwrap();
+
+        let cards = instance_lock
             .play_card(&self.player.read().unwrap(), card.clone())?;
         self.player.write().unwrap().cards.retain(|x| *x != card);
+
+        if let Some(trick) = cards {
+            self
+                .player
+                .write()
+                .unwrap()
+                .tricks
+                .push(trick);
+
+            instance_lock.update_finish_round(self.player.clone())?;
+        }
+
         self.player
             .write()
             .unwrap()
             .playable_cards
             .retain(|x| *x != card);
 
-        let instance_lock = self.instance.lock().unwrap();
 
-        instance_lock.update_announcable_props(self.player.clone());
-        instance_lock.run_swap_trump_check(self.player.clone());
-        instance_lock.update_playable_cards(self.player.clone());
+        let mut player_lock = self.player.write().unwrap();
+        instance_lock.update_announcable_props(&mut player_lock);
+        instance_lock.run_swap_trump_check(&mut player_lock);
+        instance_lock.update_playable_cards(&mut player_lock);
 
         Ok(())
     }
@@ -104,7 +117,7 @@ impl SchnapsenDuoClient {
         self.instance
             .lock()
             .unwrap()
-            .update_playable_cards(self.player.clone());
+            .update_playable_cards(&mut self.player.write().unwrap());
         Ok(())
     }
 
@@ -144,7 +157,7 @@ impl SchnapsenDuoClient {
         let mut instance_lock = self.instance.lock().unwrap();
         instance_lock
             .notify_changes_playable_cards(&self.player.read().unwrap(), &announcement.cards);
-        instance_lock.update_announcable_props(self.player.clone());
+        instance_lock.update_announcable_props(&mut self.player.write().unwrap());
         instance_lock.update_finish_round(self.player.clone())?;
         Ok(())
     }

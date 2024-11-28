@@ -442,10 +442,11 @@ impl SchnapsenDuo {
             player_order
                 .into_iter()
                 .map(|player| {
-                    self.update_playable_cards(player.clone())
+                    let mut player_lock = player.write().unwrap();
+                    self.update_playable_cards(&mut player_lock)
                         .into_iter()
-                        .chain(self.run_swap_trump_check(player.clone()).into_iter())
-                        .chain(self.update_announcable_props(player).into_iter())
+                        .chain(self.run_swap_trump_check(&mut player_lock).into_iter())
+                        .chain(self.update_announcable_props(&mut player_lock).into_iter())
                 })
                 .flatten(),
         );
@@ -474,7 +475,7 @@ impl SchnapsenDuo {
         Ok(())
     }
 
-    pub fn play_card(&mut self, player: &Player, card: Card) -> Result<(), PlayerError> {
+    pub fn play_card(&mut self, player: &Player, card: Card) -> Result<Option<[Card; 2]>, PlayerError> {
         if self.active.is_none() || !self.is_active(player) {
             return Err(PlayerError::PlayerNotActive);
         }
@@ -501,7 +502,7 @@ impl SchnapsenDuo {
         });
 
         if self.stack.len() == 2 {
-            self.handle_trick()?;
+            return Ok(Some(self.handle_trick()?));
         } else {
             self.swap_to(self.get_non_active_player().unwrap());
             self.notify_priv(
@@ -509,7 +510,7 @@ impl SchnapsenDuo {
                 PrivateEvent::AllowPlayCard,
             );
         }
-        Ok(())
+        Ok(None)
     }
 
     pub fn swap_trump(&mut self, player: &Player, card: Card) -> Result<Card, PlayerError> {
@@ -678,10 +679,10 @@ impl SchnapsenDuo {
 
     fn update_announcable_props(
         &self,
-        player: Arc<RwLock<Player>>,
+        player: &mut Player,
     ) -> Vec<tokio::task::JoinHandle<()>> {
-        let (callbacks, announcable) = self.notify_announcable_props(&player.read().unwrap());
-        player.write().unwrap().announcable = announcable;
+        let (callbacks, announcable) = self.notify_announcable_props(player);
+        player.announcable = announcable;
         callbacks
     }
 
@@ -752,10 +753,10 @@ impl SchnapsenDuo {
 
     fn run_swap_trump_check(
         &self,
-        player: Arc<RwLock<Player>>,
+        player: &mut Player,
     ) -> Vec<tokio::task::JoinHandle<()>> {
-        let (callbacks, can_swap) = self.notify_swap_trump_check(&player.read().unwrap());
-        player.write().unwrap().possible_trump_swap = can_swap;
+        let (callbacks, can_swap) = self.notify_swap_trump_check(player);
+        player.possible_trump_swap = can_swap;
         callbacks
     }
 
@@ -788,7 +789,7 @@ impl SchnapsenDuo {
     fn run_after_move_checks(&mut self) {}
 
     fn swap_to(&mut self, player: Arc<RwLock<Player>>) {
-        self.update_playable_cards(player.clone());
+        self.update_playable_cards(&mut player.write().unwrap());
         if self.active.is_none() || Arc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return;
         }
@@ -978,7 +979,7 @@ impl SchnapsenDuo {
         })
     }
 
-    fn handle_trick(&mut self) -> Result<(), PlayerError> {
+    fn handle_trick(&mut self) -> Result<[Card; 2], PlayerError> {
         let won = self
             .get_winner([
                 &(
@@ -999,11 +1000,7 @@ impl SchnapsenDuo {
             cards: self.stack.clone().try_into().unwrap(),
         });
 
-        won.as_ref()
-            .write()
-            .unwrap()
-            .tricks
-            .push([self.stack.pop().unwrap(), self.stack.pop().unwrap()]);
+        let cards = [self.stack.pop().unwrap(), self.stack.pop().unwrap()]; 
 
         self.swap_to(won.clone());
 
@@ -1016,7 +1013,7 @@ impl SchnapsenDuo {
             self.notify_priv(won_id, PrivateEvent::AllowPlayCard);
         }
 
-        self.update_finish_round(won)
+        Ok(cards)
     }
 
     fn do_cards(&mut self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
@@ -1098,12 +1095,13 @@ impl SchnapsenDuo {
 
     fn update_playable_cards(
         &self,
-        player: Arc<RwLock<Player>>,
+        player: &mut Player,
     ) -> Vec<tokio::task::JoinHandle<()>> {
-        let playable_cards = self.find_playable_cards(&player.read().unwrap());
+        let playable_cards = self.find_playable_cards(player);
 
-        player.write().unwrap().playable_cards = playable_cards.to_vec();
-        let callbacks = self.notify_changes_playable_cards(&player.read().unwrap(), &playable_cards);
+        let callbacks = self.notify_changes_playable_cards(player, &playable_cards);
+
+        player.playable_cards = playable_cards.to_vec();
 
         callbacks
     }

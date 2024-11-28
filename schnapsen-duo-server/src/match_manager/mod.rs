@@ -317,11 +317,8 @@ impl WriteMatchManager {
             });
 
             if self.write_connected.read().unwrap().len() == self.meta.player_write.len()
-                && !self.started.load(std::sync::atomic::Ordering::SeqCst)
+                && !self.started.swap(true, std::sync::atomic::Ordering::SeqCst)
             {
-                self.started
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-
                 self.start_match(data);
             };
         });
