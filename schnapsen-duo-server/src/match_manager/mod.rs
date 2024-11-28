@@ -319,6 +319,9 @@ impl WriteMatchManager {
             if self.write_connected.read().unwrap().len() == self.meta.player_write.len()
                 && !self.started.load(std::sync::atomic::Ordering::SeqCst)
             {
+                self.started
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+
                 self.start_match(data);
             };
         });
@@ -330,8 +333,6 @@ impl WriteMatchManager {
         let active_player = lock.get_player(&begin_player_id);
         lock.set_active_player(active_player.unwrap()).unwrap();
         lock.distribute_cards().unwrap();
-        self.started
-            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     async fn setup_read_ns(self: Arc<Self>, socket: SocketRef) {

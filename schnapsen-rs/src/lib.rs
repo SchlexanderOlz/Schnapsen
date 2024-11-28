@@ -1102,9 +1102,9 @@ impl SchnapsenDuo {
     ) -> Vec<tokio::task::JoinHandle<()>> {
         let playable_cards = self.find_playable_cards(&player.read().unwrap());
 
+        player.write().unwrap().playable_cards = playable_cards.to_vec();
         let callbacks = self.notify_changes_playable_cards(&player.read().unwrap(), &playable_cards);
 
-        player.write().unwrap().playable_cards = playable_cards.to_vec();
         callbacks
     }
 
