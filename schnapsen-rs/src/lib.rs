@@ -425,7 +425,7 @@ impl SchnapsenDuo {
         let mut callbacks = Vec::new();
         for player in player_order.clone() {
             for _ in 0..3 {
-                callbacks.extend(self.do_cards(player.clone()));
+                callbacks.extend(self.do_cards(&mut player.write().unwrap()));
             }
         }
         let trump = self.deck.pop().unwrap();
@@ -434,7 +434,7 @@ impl SchnapsenDuo {
 
         for player in player_order.clone() {
             for _ in 0..2 {
-                callbacks.extend(self.do_cards(player.clone()));
+                callbacks.extend(self.do_cards(&mut player.write().unwrap()));
             }
         }
 
@@ -789,7 +789,6 @@ impl SchnapsenDuo {
     fn run_after_move_checks(&mut self) {}
 
     fn swap_to(&mut self, player: Arc<RwLock<Player>>) {
-        self.update_playable_cards(&mut player.write().unwrap());
         if self.active.is_none() || Arc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return;
         }
@@ -1016,16 +1015,16 @@ impl SchnapsenDuo {
         Ok(cards)
     }
 
-    fn do_cards(&mut self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
+    fn do_cards(&mut self, player: &mut Player) -> Vec<tokio::task::JoinHandle<()>> {
         let card = self.deck.pop().unwrap();
         let mut callbacks = self.notify_priv(
-            player.as_ref().read().unwrap().id.clone(),
+            player.id.clone(),
             PrivateEvent::CardAvailabe(card.clone()),
         );
         callbacks.extend(self.notify_pub(PublicEvent::ReceiveCard {
-            user_id: player.as_ref().read().unwrap().id.clone(),
+            user_id: player.id.clone(),
         }));
-        player.as_ref().write().unwrap().cards.push(card);
+        player.cards.push(card);
         callbacks
     }
 
