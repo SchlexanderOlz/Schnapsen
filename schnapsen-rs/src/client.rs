@@ -20,7 +20,7 @@ impl SchnapsenDuoClient {
         self.instance
             .lock()
             .unwrap()
-            .cutt_deck(&self.player.read().unwrap(), cards_to_take)
+            .cutt_deck(self.player.clone(), cards_to_take)
     }
 
     #[inline]
@@ -41,16 +41,10 @@ impl SchnapsenDuoClient {
             .instance
             .lock()
             .unwrap()
-            .draw_card_after_trick(&self.player.read().unwrap())?;
+            .draw_card_after_trick(self.player.clone())?;
         self.player.write().unwrap().cards.push(card);
 
-        let instance_lock = self.instance.lock().unwrap();
-
-        let mut player_lock = self.player.write().unwrap();
-        instance_lock.update_announcable_props(&mut player_lock);
-        instance_lock.run_swap_trump_check(&mut player_lock);
-        instance_lock.update_playable_cards(&mut player_lock);
-
+        self.update_player_state();
         Ok(())
     }
 
@@ -58,7 +52,7 @@ impl SchnapsenDuoClient {
         self.instance
             .lock()
             .unwrap()
-            .close_talon(&self.player.read().unwrap())
+            .close_talon(self.player.clone())
     }
 
     pub fn take_cards_til(&self, idx: usize) -> Result<(), crate::PlayerError> {
@@ -66,42 +60,26 @@ impl SchnapsenDuoClient {
             .instance
             .lock()
             .unwrap()
-            .take_cards_til(&self.player.read().unwrap(), idx)?;
+            .take_cards_til(self.player.clone(), idx)?;
 
         self.player.write().unwrap().cards.extend(cards);
         Ok(())
     }
 
     pub fn play_card(&self, card: crate::Card) -> Result<(), crate::PlayerError> {
-        let mut instance_lock = self.instance.lock().unwrap();
+        self.instance
+            .lock()
+            .unwrap()
+            .play_card(self.player.clone(), card.clone())?;
 
-        let cards = instance_lock
-            .play_card(&self.player.read().unwrap(), card.clone())?;
         self.player.write().unwrap().cards.retain(|x| *x != card);
-
-        if let Some(trick) = cards {
-            self
-                .player
-                .write()
-                .unwrap()
-                .tricks
-                .push(trick);
-
-            instance_lock.update_finish_round(self.player.clone())?;
-        }
-
         self.player
             .write()
             .unwrap()
             .playable_cards
             .retain(|x| *x != card);
 
-
-        let mut player_lock = self.player.write().unwrap();
-        instance_lock.update_announcable_props(&mut player_lock);
-        instance_lock.run_swap_trump_check(&mut player_lock);
-        instance_lock.update_playable_cards(&mut player_lock);
-
+        self.update_player_state();
         Ok(())
     }
 
@@ -110,14 +88,13 @@ impl SchnapsenDuoClient {
             .instance
             .lock()
             .unwrap()
-            .swap_trump(&self.player.read().unwrap(), card.clone())?;
+            .swap_trump(self.player.clone(), card.clone())?;
+
         self.player.write().unwrap().cards.retain(|x| *x != card);
         self.player.write().unwrap().cards.push(swap);
 
-        self.instance
-            .lock()
-            .unwrap()
-            .update_playable_cards(&mut self.player.write().unwrap());
+        self.update_player_state();
+
         Ok(())
     }
 
@@ -127,11 +104,6 @@ impl SchnapsenDuoClient {
             .lock()
             .unwrap()
             .announce_40(&self.player.read().unwrap())?;
-        self.player
-            .write()
-            .unwrap()
-            .announcements
-            .push(announcement.clone());
 
         self.announce_state_changes(announcement)?;
         Ok(())
@@ -143,22 +115,45 @@ impl SchnapsenDuoClient {
             .lock()
             .unwrap()
             .announce_20(&self.player.read().unwrap(), cards)?;
+
+        self.announce_state_changes(announcement)?;
+        Ok(())
+    }
+
+    fn announce_state_changes(&self, announcement: Announcement) -> Result<(), PlayerError> {
         self.player
             .write()
             .unwrap()
             .announcements
             .push(announcement.clone());
-        self.announce_state_changes(announcement)?;
-        Ok(())
-    }
 
-    // NOTE: Calls like these directly on the instance are not recommended as they modify the player object. This should rather be done directly in this class.
-    fn announce_state_changes(&self, announcement: Announcement) -> Result<(), PlayerError> {
+        self.player
+            .write()
+            .unwrap()
+            .announcable
+            .retain(|x| *x == announcement);
+
         let mut instance_lock = self.instance.lock().unwrap();
         instance_lock
             .notify_changes_playable_cards(&self.player.read().unwrap(), &announcement.cards);
-        instance_lock.update_announcable_props(&mut self.player.write().unwrap());
+
+        self.player.write().unwrap().playable_cards = announcement.cards.to_vec();
+        instance_lock.update_announcable_props(self.player.clone());
         instance_lock.update_finish_round(self.player.clone())?;
         Ok(())
+    }
+
+    fn update_player_state(&self) {
+        let instance_lock = self.instance.lock().unwrap();
+        let (_, announcable) = instance_lock.notify_announcable_props(&self.player.read().unwrap());
+        self.player.write().unwrap().announcable = announcable;
+
+        let (_, can_swap) = instance_lock.notify_swap_trump_check(&self.player.read().unwrap());
+        self.player.write().unwrap().possible_trump_swap = can_swap;
+
+        let playable_cards = instance_lock.find_playable_cards(self.player.clone());
+        instance_lock.notify_changes_playable_cards(&self.player.read().unwrap(), &playable_cards);
+
+        self.player.write().unwrap().playable_cards = playable_cards.to_vec();
     }
 }

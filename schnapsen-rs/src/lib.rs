@@ -266,9 +266,10 @@ impl SchnapsenDuo {
 
     pub fn cutt_deck(
         &mut self,
-        player: &Player,
+        player: Arc<RwLock<Player>>,
         mut cards_to_take: usize,
     ) -> Result<(), PlayerError> {
+        let player = &player.read().unwrap();
         if player.id != self.active.as_ref().unwrap().read().unwrap().id {
             return Err(PlayerError::CantTakeCardRoundNotFinished);
         }
@@ -284,7 +285,8 @@ impl SchnapsenDuo {
         self.active.as_ref().unwrap().read().unwrap().id == player.id
     }
 
-    pub fn draw_card_after_trick(&mut self, player: &Player) -> Result<Card, PlayerError> {
+    pub fn draw_card_after_trick(&mut self, player: Arc<RwLock<Player>>) -> Result<Card, PlayerError> {
+        let player = &player.read().unwrap();
         if !self.is_active(player) {
             return Err(PlayerError::PlayerNotActive);
         }
@@ -341,7 +343,8 @@ impl SchnapsenDuo {
         Ok(card)
     }
 
-    pub fn close_talon(&mut self, player: &Player) -> Result<(), PlayerError> {
+    pub fn close_talon(&mut self, player: Arc<RwLock<Player>>) -> Result<(), PlayerError> {
+        let player = &player.read().unwrap();
         if self.active.is_none()
             || !self.is_active(player)
             || self.deck.is_empty()
@@ -365,9 +368,10 @@ impl SchnapsenDuo {
     #[inline]
     pub fn take_cards_til(
         &mut self,
-        player: &Player,
+        player: Arc<RwLock<Player>>,
         idx: usize,
     ) -> Result<Vec<Card>, PlayerError> {
+        let player = &player.read().unwrap();
         if idx >= self.deck.len() - 1 {
             return Err(PlayerError::CantTakeAllDeckCards);
         }
@@ -442,11 +446,10 @@ impl SchnapsenDuo {
             player_order
                 .into_iter()
                 .map(|player| {
-                    let mut player_lock = player.write().unwrap();
-                    self.update_playable_cards(&mut player_lock)
+                    self.update_playable_cards(player.clone())
                         .into_iter()
-                        .chain(self.run_swap_trump_check(&mut player_lock).into_iter())
-                        .chain(self.update_announcable_props(&mut player_lock).into_iter())
+                        .chain(self.run_swap_trump_check(player.clone()).into_iter())
+                        .chain(self.update_announcable_props(player.clone()).into_iter())
                 })
                 .flatten(),
         );
@@ -475,17 +478,21 @@ impl SchnapsenDuo {
         Ok(())
     }
 
-    pub fn play_card(&mut self, player: &Player, card: Card) -> Result<Option<[Card; 2]>, PlayerError> {
-        if self.active.is_none() || !self.is_active(player) {
+    pub fn play_card(
+        &mut self,
+        player: Arc<RwLock<Player>>,
+        card: Card,
+    ) -> Result<(), PlayerError> {
+        if self.active.is_none() || !self.is_active(&player.read().unwrap()) {
             return Err(PlayerError::PlayerNotActive);
         }
 
-        if !player.playable_cards.contains(&card) {
+        if !player.read().unwrap().playable_cards.contains(&card) {
             return Err(PlayerError::CantPlayCard(card));
         }
 
         self.stack.push(card.clone());
-        let player_id = player.id.clone();
+        let player_id = player.read().unwrap().id.clone();
         self.notify_priv(
             player_id.clone(),
             PrivateEvent::CardUnavailabe(card.clone()),
@@ -502,7 +509,7 @@ impl SchnapsenDuo {
         });
 
         if self.stack.len() == 2 {
-            return Ok(Some(self.handle_trick()?));
+            return self.handle_trick();
         } else {
             self.swap_to(self.get_non_active_player().unwrap());
             self.notify_priv(
@@ -510,10 +517,11 @@ impl SchnapsenDuo {
                 PrivateEvent::AllowPlayCard,
             );
         }
-        Ok(None)
+        Ok(())
     }
 
-    pub fn swap_trump(&mut self, player: &Player, card: Card) -> Result<Card, PlayerError> {
+    pub fn swap_trump(&mut self, player: Arc<RwLock<Player>>, card: Card) -> Result<Card, PlayerError> {
+        let player = &player.read().unwrap();
         if let Some(swap) = self.can_swap_trump(player) {
             if *swap != card {
                 return Err(PlayerError::CantSwapTrump);
@@ -589,12 +597,10 @@ impl SchnapsenDuo {
         if self.active.is_none() || !self.is_active(player) {
             return Vec::new();
         }
-        let player = self.active.as_deref().unwrap();
 
         (0..4)
             .filter_map(move |suit: u8| {
-                let borrow = player.read().unwrap();
-                let mut cards_iter = borrow.cards.iter().filter(|card| {
+                let mut cards_iter = player.cards.iter().filter(|card| {
                     card.suit == suit.into()
                         && (card.value == models::CardVal::Queen
                             || card.value == models::CardVal::King)
@@ -679,10 +685,10 @@ impl SchnapsenDuo {
 
     fn update_announcable_props(
         &self,
-        player: &mut Player,
+        player: Arc<RwLock<Player>>,
     ) -> Vec<tokio::task::JoinHandle<()>> {
-        let (callbacks, announcable) = self.notify_announcable_props(player);
-        player.announcable = announcable;
+        let (callbacks, announcable) = self.notify_announcable_props(&player.read().unwrap());
+        player.write().unwrap().announcable = announcable;
         callbacks
     }
 
@@ -753,10 +759,10 @@ impl SchnapsenDuo {
 
     fn run_swap_trump_check(
         &self,
-        player: &mut Player,
+        player: Arc<RwLock<Player>>,
     ) -> Vec<tokio::task::JoinHandle<()>> {
-        let (callbacks, can_swap) = self.notify_swap_trump_check(player);
-        player.possible_trump_swap = can_swap;
+        let (callbacks, can_swap) = self.notify_swap_trump_check(&player.read().unwrap());
+        player.write().unwrap().possible_trump_swap = can_swap;
         callbacks
     }
 
@@ -786,9 +792,8 @@ impl SchnapsenDuo {
         (callbacks, None)
     }
 
-    fn run_after_move_checks(&mut self) {}
-
     fn swap_to(&mut self, player: Arc<RwLock<Player>>) {
+        self.update_playable_cards(player.clone());
         if self.active.is_none() || Arc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return;
         }
@@ -978,7 +983,7 @@ impl SchnapsenDuo {
         })
     }
 
-    fn handle_trick(&mut self) -> Result<[Card; 2], PlayerError> {
+    fn handle_trick(&mut self) -> Result<(), PlayerError> {
         let won = self
             .get_winner([
                 &(
@@ -999,7 +1004,11 @@ impl SchnapsenDuo {
             cards: self.stack.clone().try_into().unwrap(),
         });
 
-        let cards = [self.stack.pop().unwrap(), self.stack.pop().unwrap()]; 
+        let cards = [self.stack.pop().unwrap(), self.stack.pop().unwrap()];
+
+        won.write().unwrap().tricks.push(cards);
+
+        self.update_finish_round(won.clone())?;
 
         self.swap_to(won.clone());
 
@@ -1012,15 +1021,13 @@ impl SchnapsenDuo {
             self.notify_priv(won_id, PrivateEvent::AllowPlayCard);
         }
 
-        Ok(cards)
+        Ok(())
     }
 
     fn do_cards(&mut self, player: &mut Player) -> Vec<tokio::task::JoinHandle<()>> {
         let card = self.deck.pop().unwrap();
-        let mut callbacks = self.notify_priv(
-            player.id.clone(),
-            PrivateEvent::CardAvailabe(card.clone()),
-        );
+        let mut callbacks =
+            self.notify_priv(player.id.clone(), PrivateEvent::CardAvailabe(card.clone()));
         callbacks.extend(self.notify_pub(PublicEvent::ReceiveCard {
             user_id: player.id.clone(),
         }));
@@ -1094,18 +1101,19 @@ impl SchnapsenDuo {
 
     fn update_playable_cards(
         &self,
-        player: &mut Player,
+        player: Arc<RwLock<Player>>,
     ) -> Vec<tokio::task::JoinHandle<()>> {
-        let playable_cards = self.find_playable_cards(player);
+        let playable_cards = self.find_playable_cards(player.clone());
 
-        let callbacks = self.notify_changes_playable_cards(player, &playable_cards);
+        let callbacks =
+            self.notify_changes_playable_cards(&player.read().unwrap(), &playable_cards);
 
-        player.playable_cards = playable_cards.to_vec();
+        player.write().unwrap().playable_cards = playable_cards.to_vec();
 
         callbacks
     }
 
-    fn find_playable_cards(&self, player: &Player) -> Vec<Card> {
+    fn find_playable_cards(&self, player: Arc<RwLock<Player>>) -> Vec<Card> {
         let mut playable = {
             if !self.stack.is_empty() && (self.taken_trump.is_some() || self.closed_talon.is_some())
             {
@@ -1116,6 +1124,8 @@ impl SchnapsenDuo {
 
                 // Force color
                 let forcing_color: Vec<_> = player
+                    .read()
+                    .unwrap()
                     .cards
                     .iter()
                     .filter(|card| card.suit == self.stack.first().unwrap().suit.clone())
@@ -1124,6 +1134,8 @@ impl SchnapsenDuo {
 
                 if forcing_color.is_empty() {
                     player
+                        .read()
+                        .unwrap()
                         .cards
                         .iter()
                         .filter(|card| card.suit == trump.suit)
@@ -1133,12 +1145,12 @@ impl SchnapsenDuo {
                     forcing_color
                 }
             } else {
-                player.cards.clone()
+                player.read().unwrap().cards.clone()
             }
         };
 
         if playable.is_empty() {
-            playable = player.cards.clone();
+            playable = player.read().unwrap().cards.clone();
         }
 
         if self.closed_talon.is_some() && !self.stack.is_empty() {
@@ -1157,7 +1169,7 @@ impl SchnapsenDuo {
                     .0
                     .read()
                     .unwrap()
-                    .id == player.id
+                    .id == player.read().unwrap().id
                 })
                 .collect();
 
