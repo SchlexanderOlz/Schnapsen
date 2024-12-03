@@ -448,7 +448,7 @@ impl SchnapsenDuo {
                 .map(|player| {
                     self.update_playable_cards(player.clone())
                         .into_iter()
-                        .chain(self.run_swap_trump_check(player.clone()).into_iter())
+                        .chain(self.update_swap_trump(player.clone()).into_iter())
                         .chain(self.update_announcable_props(player.clone()).into_iter())
                 })
                 .flatten(),
@@ -757,7 +757,7 @@ impl SchnapsenDuo {
         (callbacks, announcable)
     }
 
-    fn run_swap_trump_check(
+    fn update_swap_trump(
         &self,
         player: Arc<RwLock<Player>>,
     ) -> Vec<tokio::task::JoinHandle<()>> {
@@ -794,15 +794,20 @@ impl SchnapsenDuo {
 
     fn swap_to(&mut self, player: Arc<RwLock<Player>>) {
         self.update_playable_cards(player.clone());
+
         if self.active.is_none() || Arc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return;
         }
+
+
         let user_id = self.active.as_deref().unwrap().read().unwrap().id.clone();
         self.notify_pub(PublicEvent::Inactive {
             user_id: user_id.clone(),
         });
 
-        self.make_active(player);
+        self.make_active(player.clone());
+        self.update_announcable_props(player.clone());
+        self.update_swap_trump(player);
     }
 
     fn make_active(&mut self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
