@@ -2,6 +2,22 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::event_logger::EventLike;
+
+#[derive(Serialize)]
+pub struct Performance {
+    pub name: String,
+    pub weight: i32,
+}
+
+#[derive(Serialize)]
+pub struct RankingConf {
+    pub max_stars: i32,
+    pub description: String,
+    pub performances: Vec<Performance>,
+}
+
+
 #[derive(Serialize)]
 pub struct GameServer {
     pub region: String,
@@ -10,6 +26,8 @@ pub struct GameServer {
     pub server_priv: String,
     pub server_pub: String,
     pub token: String, // Token to authorize as the main-server at this game-server
+
+    pub ranking_conf: RankingConf,
 }
 
 

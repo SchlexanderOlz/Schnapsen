@@ -25,3 +25,4 @@ tower-http = { version = "0.6.1", features = ["cors", "trace"] }
 lapin = "2.5.0"
 futures-lite = "2.5.0"
 uuid = { version = "1.11.0", features = ["v4"] }
+rbtree = "0.2.0"

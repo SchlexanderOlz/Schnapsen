@@ -1,4 +1,5 @@
 use axum::{self, routing};
+use event_logger::EventLogger;
 use futures::{io::ReadToString, StreamExt};
 use lapin::{
     options::{
@@ -33,6 +34,7 @@ mod match_manager;
 mod models;
 mod performer;
 mod translator;
+mod event_logger;
 
 const CREATE_MATCH_QUEUE: &str = "match-created";
 const RESULT_MATCH_QUEUE: &str = "match-result";
@@ -113,6 +115,12 @@ async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>
 
             let instance = match_manager.get_match();
 
+            let logger: EventLogger<schnapsen_rs::PrivateEvent, schnapsen_rs::PublicEvent> = event_logger::EventLogger::new();
+
+            instance.lock().unwrap().on_pub_event(move |event| {
+                logger.log(event);
+            });
+
             {
                 let created_match = created_match.clone();
                 let channel = channel.clone();
@@ -170,6 +178,7 @@ async fn register_server(
     let public_url = std::env::var("PUBLIC_ADDR").expect("SCHNAPSEN_DUO_PUBLIC_ADDR must be set");
     let private_url =
         std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
+    let region = std::env::var("REGION").expect("REGION must be set");
 
     let reply_to = channel
         .queue_declare("", QueueDeclareOptions::default(), FieldTable::default())
@@ -187,7 +196,7 @@ async fn register_server(
         .unwrap();
 
     let server_info = GameServer {
-        region: "eu".to_string(),
+        region,
         game: "Schnapsen".to_string(),
         mode: GameMode {
             name: "duo".to_string(),
@@ -197,6 +206,20 @@ async fn register_server(
         server_pub: public_url,
         server_priv: private_url,
         token: "token".to_string(),
+        ranking_conf: models::RankingConf {
+            max_stars: 5000,
+            description: "Schnapsen Duo".to_string(),
+            performances: vec![
+                models::Performance {
+                    name: "win".to_string(),
+                    weight: 1,
+                },
+                models::Performance {
+                    name: "lose".to_string(),
+                    weight: -1,
+                },
+            ],
+        },
     };
 
     channel
