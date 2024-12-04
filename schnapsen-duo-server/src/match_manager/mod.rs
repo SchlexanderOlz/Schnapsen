@@ -24,6 +24,7 @@ use tracing::error;
 
 use crate::{
     emitter,
+    events::{event_logger, SchnapsenDuoEventType},
     models::{CreateMatch, MatchCreated, Timeout},
     performer, translator,
 };
@@ -36,6 +37,7 @@ pub struct WriteMatchManager {
     match_id: String,
     write_connected: std::sync::RwLock<HashMap<String, Vec<Arc<tokio::sync::Mutex<SocketRef>>>>>,
     awaiting_reconnection: std::sync::Mutex<HashMap<String, Sender<bool>>>,
+    logger: Arc<std::sync::Mutex<event_logger::EventLogger<SchnapsenDuoEventType>>>,
     exited: AtomicI8,
     started: AtomicBool,
 }
@@ -60,6 +62,8 @@ impl WriteMatchManager {
             std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
         let region = std::env::var("REGION").expect("REGION must be set");
 
+        let logger = Self::setup_event_log(instance.clone(), &new_match);
+
         let meta = MatchCreated {
             region,
             game: new_match.game,
@@ -77,6 +81,7 @@ impl WriteMatchManager {
         let new = Arc::new(Self {
             instance: instance.clone(),
             meta,
+            logger,
             match_id: read.to_string(),
             write_connected: RwLock::new(HashMap::new()),
             exited: AtomicI8::new(0),
@@ -86,7 +91,9 @@ impl WriteMatchManager {
 
         {
             let new = new.clone();
-            io.ns(format!("/{read}"), move |socket: SocketRef| new.setup_read_ns(socket));
+            io.ns(format!("/{read}"), move |socket: SocketRef| {
+                new.setup_read_ns(socket)
+            });
         }
 
         // TODO: The created match should be added to some active-state
@@ -103,8 +110,39 @@ impl WriteMatchManager {
         self.instance.clone()
     }
 
+    async fn play_card_or_timeout(self: Arc<Self>, event: PrivateEvent, player_id: String) {
+        let (tx, rx) = watch::channel(false);
+        if let PrivateEvent::AllowPlayCard = event {
+            let player_id_copy = player_id.clone();
+            let on_play_card = move |event| {
+                if let PublicEvent::PlayCard { user_id, card: _ } = event {
+                    if player_id_copy == user_id {
+                        let _ = tx.send(true);
+                    }
+                }
+            };
+
+            self.instance
+                .lock()
+                .unwrap()
+                .on_pub_event(on_play_card.clone());
+
+            self.clone().await_timeout(rx, player_id).await;
+            self.instance.lock().unwrap().off_pub_event(on_play_card);
+        }
+    }
+
+    async fn await_timeout(self: Arc<Self>, mut rx: Receiver<bool>, player_id: String) {
+        select! {
+            _ = rx.changed() => {}
+            _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
+                self.exited.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.clone().timeout_player(player_id.clone());
+            }
+        };
+    }
+
     fn wait_for_move(self: Arc<Self>, player_id: String) {
-        let instance_clone = self.instance.clone();
         let player = self
             .instance
             .lock()
@@ -117,43 +155,8 @@ impl WriteMatchManager {
             .lock()
             .unwrap()
             .on_priv_event(player, move |event| {
-                let instance_clone = instance_clone.clone();
-                let correct_id = player_id.clone();
-
-                let match_manager = self.clone();
-
-                let player_id = player_id.clone();
-                tokio::task::spawn(async move {
-                    let (tx, rx) = watch::channel(false);
-                    if let PrivateEvent::AllowPlayCard = event {
-                        let on_play_card = move |event| {
-                            if let PublicEvent::PlayCard { user_id, card: _ } = event {
-                                if correct_id == user_id {
-                                    let _ = tx.send(true);
-                                }
-                            }
-                        };
-
-                        instance_clone
-                            .lock()
-                            .unwrap()
-                            .on_pub_event(on_play_card.clone());
-
-                        match_manager.await_timeout(rx, player_id).await;
-                        instance_clone.lock().unwrap().off_pub_event(on_play_card);
-                    }
-                });
+                tokio::task::spawn(self.clone().play_card_or_timeout(event, player_id.clone()));
             });
-    }
-
-    async fn await_timeout(self: Arc<Self>, mut rx: Receiver<bool>, player_id: String) {
-        select! {
-            _ = rx.changed() => {}
-            _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
-                self.exited.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                self.clone().timeout_player(player_id.clone());
-            }
-        };
     }
 
     fn timeout_player(self: Arc<Self>, player_id: String) {
@@ -176,6 +179,37 @@ impl WriteMatchManager {
                 });
             }
         }
+    }
+
+    fn setup_event_log(
+        instance: Arc<std::sync::Mutex<SchnapsenDuo>>,
+        new_match: &CreateMatch,
+    ) -> Arc<std::sync::Mutex<event_logger::EventLogger<SchnapsenDuoEventType>>> {
+        let logger = Arc::new(std::sync::Mutex::new(event_logger::EventLogger::new()));
+        {
+            let logger = logger.clone();
+            instance.lock().unwrap().on_pub_event(move |event| {
+                logger
+                    .lock()
+                    .unwrap()
+                    .log(SchnapsenDuoEventType::Public(event).into());
+            });
+        }
+
+        for player in &new_match.players {
+            let mut instance_lock = instance.lock().unwrap();
+            let player = instance_lock.get_player(&player).unwrap();
+
+            let logger = logger.clone();
+            instance_lock.on_priv_event(player, move |event| {
+                logger
+                    .lock()
+                    .unwrap()
+                    .log(SchnapsenDuoEventType::Private(event).into());
+            });
+        }
+
+        logger
     }
 
     async fn setup_private_access(
@@ -234,7 +268,6 @@ impl WriteMatchManager {
             {
                 return;
             }
-
 
             let res = performer.perform(action);
             if res.is_err() {

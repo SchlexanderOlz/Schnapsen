@@ -1,5 +1,5 @@
 use axum::{self, routing};
-use event_logger::EventLogger;
+use events::{event_logger, SchnapsenDuoEventType};
 use futures::{io::ReadToString, StreamExt};
 use lapin::{
     options::{
@@ -10,7 +10,7 @@ use lapin::{
     types::FieldTable,
     BasicProperties,
 };
-use models::{CreateMatch, EventType, GameMode, GameServer, MatchCreated, MatchResult};
+use models::{CreateMatch, GameMode, GameServer, MatchCreated, MatchResult};
 use schnapsen_rs::{PublicEvent, SchnapsenDuo};
 use socketioxide::{
     extract::{Data, SocketRef},
@@ -30,11 +30,11 @@ use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod emitter;
+mod events;
 mod match_manager;
 mod models;
 mod performer;
 mod translator;
-mod event_logger;
 
 const CREATE_MATCH_QUEUE: &str = "match-created";
 const RESULT_MATCH_QUEUE: &str = "match-result";
@@ -56,6 +56,33 @@ fn notify_match_result(channel: Arc<lapin::Channel>, result: MatchResult) {
             )
             .await
             .unwrap();
+    });
+}
+
+
+fn setup_match_result_handler(
+    instance: Arc<Mutex<SchnapsenDuo>>,
+    channel: Arc<lapin::Channel>,
+    created_match: MatchCreated,
+) {
+    let channel = channel.clone();
+    instance.lock().unwrap().on_pub_event(move |event| {
+        // TODO|POTERROR: Change this to final result
+        if let PublicEvent::Result {
+            winner,
+            points,
+            ranked,
+        } = event
+        {
+            let result = MatchResult {
+                match_id: created_match.read.clone(),
+                winner,
+                points,
+                ranked,
+            };
+
+            notify_match_result(channel.clone(), result);
+        }
     });
 }
 
@@ -105,53 +132,16 @@ async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>
     while let Some(delivery) = consumer.next().await {
         let on_create = on_create.clone();
         let channel = channel.clone();
+        let delivery = delivery.expect("error in consumer");
+        delivery.ack(BasicAckOptions::default()).await.expect("ack");
+        let new_match: CreateMatch = serde_json::from_slice(&delivery.data).unwrap();
+
         tokio::spawn(async move {
-            let delivery = delivery.expect("error in consumer");
-            delivery.ack(BasicAckOptions::default()).await.expect("ack");
-            let new_match: CreateMatch = serde_json::from_slice(&delivery.data).unwrap();
-            let match_manager = on_create(new_match);
-
+            let match_manager = on_create(new_match.clone());
             let created_match = match_manager.get_meta().clone();
-
             let instance = match_manager.get_match();
 
-            let logger = event_logger::EventLogger::new();
-
-            instance.lock().unwrap().on_pub_event(move |event| {
-                logger.log(EventType::Public(event));
-            });
-
-            for player in new_match.players {
-                let instance_lock = instance.lock().unwrap();
-                let player = instance_lock.get_player(&player).unwrap();
-
-                instance_lock.on_priv_event(player, move |event| {
-                    logger.log(EventType::Private(event));
-                });
-            }
-
-            {
-                let created_match = created_match.clone();
-                let channel = channel.clone();
-                instance.lock().unwrap().on_pub_event(move |event| {
-                    // TODO|POTERROR: Change this to final result
-                    if let PublicEvent::Result {
-                        winner,
-                        points,
-                        ranked,
-                    } = event
-                    {
-                        let result = MatchResult {
-                            match_id: created_match.read.clone(),
-                            winner,
-                            points,
-                            ranked,
-                        };
-
-                        notify_match_result(channel.clone(), result);
-                    }
-                });
-            };
+            setup_match_result_handler(instance, channel.clone(), created_match.clone());
 
             debug!("Created match: {:?}", created_match);
             channel
