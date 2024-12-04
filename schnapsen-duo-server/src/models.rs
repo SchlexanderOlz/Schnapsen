@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::{Hash, Hasher}};
 
 use serde::{Deserialize, Serialize};
 
-use crate::event_logger::EventLike;
+use crate::event_logger::{Event, EventLike};
 
 #[derive(Serialize)]
 pub struct Performance {
@@ -71,4 +71,26 @@ pub struct MatchResult {
     pub winner: String,
     pub points: u8,
     pub ranked: HashMap<String, u8>,
+}
+
+
+
+
+#[derive(Serialize, Hash, Debug, PartialEq, Eq)]
+pub enum EventType<Prv, Pub> {
+    Private(Prv),
+    Public(Pub),
+}
+
+impl<Prv, Pub> EventLike for EventType<Prv, Pub>
+where Prv: EventLike, Pub: EventLike {}
+
+impl<Prv, Pub> From<EventType<Prv, Pub>> for Event<EventType<Prv, Pub>>
+where
+    Prv: EventLike,
+    Pub: EventLike,
+{
+    fn from(value: EventType<Prv, Pub>) -> Self {
+        Event::new(value)
+    }
 }

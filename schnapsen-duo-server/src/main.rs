@@ -10,7 +10,7 @@ use lapin::{
     types::FieldTable,
     BasicProperties,
 };
-use models::{CreateMatch, GameMode, GameServer, MatchCreated, MatchResult};
+use models::{CreateMatch, EventType, GameMode, GameServer, MatchCreated, MatchResult};
 use schnapsen_rs::{PublicEvent, SchnapsenDuo};
 use socketioxide::{
     extract::{Data, SocketRef},
@@ -115,11 +115,20 @@ async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>
 
             let instance = match_manager.get_match();
 
-            let logger: EventLogger<schnapsen_rs::PrivateEvent, schnapsen_rs::PublicEvent> = event_logger::EventLogger::new();
+            let logger = event_logger::EventLogger::new();
 
             instance.lock().unwrap().on_pub_event(move |event| {
-                logger.log(event);
+                logger.log(EventType::Public(event));
             });
+
+            for player in new_match.players {
+                let instance_lock = instance.lock().unwrap();
+                let player = instance_lock.get_player(&player).unwrap();
+
+                instance_lock.on_priv_event(player, move |event| {
+                    logger.log(EventType::Private(event));
+                });
+            }
 
             {
                 let created_match = created_match.clone();
