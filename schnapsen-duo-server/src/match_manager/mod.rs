@@ -24,7 +24,7 @@ use tracing::error;
 
 use crate::{
     emitter,
-    events::{event_logger, SchnapsenDuoEventType},
+    events::{event_logger, EventType, SchnapsenDuoEventType, TimedEvent},
     models::{CreateMatch, MatchCreated, Timeout},
     performer, translator,
 };
@@ -108,6 +108,11 @@ impl WriteMatchManager {
     #[inline]
     pub fn get_match(&self) -> Arc<std::sync::Mutex<SchnapsenDuo>> {
         self.instance.clone()
+    }
+
+    #[inline]
+    pub fn get_event_log(&self) -> Vec<TimedEvent<SchnapsenDuoEventType>> {
+        self.logger.lock().unwrap().all().into_iter().cloned().collect()
     }
 
     async fn play_card_or_timeout(self: Arc<Self>, event: PrivateEvent, player_id: String) {
@@ -240,8 +245,9 @@ impl WriteMatchManager {
                 debug!("Got private event: {:?}", event);
                 let socket_clone = socket_clone.clone();
                 tokio::task::spawn(async move {
-                    if let Err(err) =
-                        emitter::to_private_event_emitter(&event)(socket_clone.lock().await.clone())
+                    if let Err(err) = emitter::to_private_event_emitter(
+                        &event.into() as &TimedEvent<PrivateEvent>
+                    )(socket_clone.lock().await.clone())
                     {
                         error!("Error emitting private event: {:?}", err);
                     }
@@ -294,7 +300,6 @@ impl WriteMatchManager {
         socket.lock().await.on_disconnect(
             move |disconnected: SocketRef, reason: DisconnectReason| {
                 debug!("Player: {:?} disconnected", player_id);
-                let match_manager = self.clone();
 
                 let should_exit = {
                     let mut lock = self.write_connected.write().unwrap();
@@ -307,54 +312,99 @@ impl WriteMatchManager {
                 };
 
                 if should_exit {
-                    tokio::spawn(async move {
-                        let (tx, mut rx) = watch::channel(false);
-
-                        self.awaiting_reconnection
-                            .lock()
-                            .unwrap()
-                            .insert(player_id.clone(), tx);
-
-                        select! {
-                            _ = rx.changed() => {}
-                            _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
-                                match_manager.timeout_player(player_id.clone());
-                            }
-                        }
-                    });
+                    tokio::spawn(self.reconnect_or_timeout(player_id));
                 }
             },
         );
     }
 
-    async fn handle_auth(self: Arc<Self>, socket: SocketRef) {
-        let socket_clone = Arc::new(tokio::sync::Mutex::new(socket.clone()));
+    async fn reconnect_or_timeout(self: Arc<Self>, player_id: String) {
+        let (tx, mut rx) = watch::channel(false);
 
-        socket.join(PUBLIC_EVENT_ROOM).unwrap();
-        socket.on("auth", move |Data(data): Data<String>| async move {
-            debug!("Authenticating: {:?} at Game: {:?}", data, self.match_id);
+        self.awaiting_reconnection
+            .lock()
+            .unwrap()
+            .insert(player_id.clone(), tx);
 
-            self.clone()
-                .setup_private_access(&data.clone(), socket_clone.clone())
-                .await;
-            debug!("Authenticated: {:?} at Game: {:?}", data, self.match_id);
+        select! {
+            _ = rx.changed() => {}
+            _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
+                self.timeout_player(player_id.clone());
+            }
+        }
+    }
 
-            self.instance.lock().unwrap().on_pub_event(move |event| {
-                let socket_clone = socket_clone.clone();
-                tokio::task::spawn(async move {
-                    emitter::to_public_event_emitter(&event)(
-                        socket_clone.lock().await.to(PUBLIC_EVENT_ROOM),
-                    )
-                    .unwrap();
-                });
+    async fn handle_auth(
+        self: Arc<Self>,
+        data: String,
+        socket: Arc<tokio::sync::Mutex<SocketRef>>,
+    ) {
+        debug!("Authenticating: {:?} at Game: {:?}", data, self.match_id);
+
+        self.clone()
+            .setup_private_access(&data.clone(), socket.clone())
+            .await;
+        debug!("Authenticated: {:?} at Game: {:?}", data, self.match_id);
+
+        self.instance.lock().unwrap().on_pub_event(move |event| {
+            let socket_clone = socket.clone();
+            tokio::task::spawn(async move {
+                emitter::to_public_event_emitter(&event.into() as &TimedEvent<PublicEvent>)(
+                    socket_clone.lock().await.to(PUBLIC_EVENT_ROOM),
+                )
+                .unwrap();
             });
-
-            if self.write_connected.read().unwrap().len() == self.meta.player_write.len()
-                && !self.started.swap(true, std::sync::atomic::Ordering::SeqCst)
-            {
-                self.start_match(data);
-            };
         });
+
+        if self.write_connected.read().unwrap().len() == self.meta.player_write.len()
+            && !self.started.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.start_match(data);
+        };
+    }
+
+    async fn setup_sync_event(self: Arc<Self>, socket: Arc<tokio::sync::Mutex<SocketRef>>) {
+        let socket_clone = socket.clone();
+        socket
+            .lock()
+            .await
+            .on("sync", move |Data(timestamp): Data<u64>| async move {
+                let events: Vec<_> = self
+                    .logger
+                    .lock()
+                    .unwrap()
+                    .events_since(timestamp)
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                for timed_event in events {
+                    match timed_event.event {
+                        EventType::Public(_) => emitter::to_public_event_emitter(&timed_event)(
+                            socket_clone.lock().await.to(PUBLIC_EVENT_ROOM),
+                        )
+                        .unwrap(),
+                        EventType::Private(_) => emitter::to_private_event_emitter(&timed_event)(
+                            socket_clone.lock().await.clone(),
+                        )
+                        .unwrap(),
+                    }
+                }
+            });
+    }
+
+    async fn listen_for_access_events(self: Arc<Self>, socket: SocketRef) {
+        let socket_ptr = Arc::new(tokio::sync::Mutex::new(socket.clone()));
+        socket.join(PUBLIC_EVENT_ROOM).unwrap();
+
+        {
+            let matchmanager = self.clone();
+            let socket_clone = socket_ptr.clone();
+            socket.on("auth", move |Data(data): Data<String>| {
+                matchmanager.handle_auth(data, socket_clone)
+            });
+        }
+
+        self.setup_sync_event(socket_ptr).await;
     }
 
     fn start_match(self: Arc<Self>, begin_player_id: String) {
@@ -368,6 +418,6 @@ impl WriteMatchManager {
     async fn setup_read_ns(self: Arc<Self>, socket: SocketRef) {
         debug!("New connection to {:?}", self.match_id);
 
-        self.handle_auth(socket).await;
+        self.listen_for_access_events(socket).await;
     }
 }

@@ -59,11 +59,11 @@ fn notify_match_result(channel: Arc<lapin::Channel>, result: MatchResult) {
     });
 }
 
-
 fn setup_match_result_handler(
     instance: Arc<Mutex<SchnapsenDuo>>,
     channel: Arc<lapin::Channel>,
     created_match: MatchCreated,
+    match_manager: Arc<match_manager::WriteMatchManager>,
 ) {
     let channel = channel.clone();
     instance.lock().unwrap().on_pub_event(move |event| {
@@ -79,6 +79,7 @@ fn setup_match_result_handler(
                 winner,
                 points,
                 ranked,
+                event_log: match_manager.get_event_log(),
             };
 
             notify_match_result(channel.clone(), result);
@@ -141,7 +142,12 @@ async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>
             let created_match = match_manager.get_meta().clone();
             let instance = match_manager.get_match();
 
-            setup_match_result_handler(instance, channel.clone(), created_match.clone());
+            setup_match_result_handler(
+                instance,
+                channel.clone(),
+                created_match.clone(),
+                match_manager,
+            );
 
             debug!("Created match: {:?}", created_match);
             channel

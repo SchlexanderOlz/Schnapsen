@@ -6,7 +6,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    emitter::EventIdentifier,
+    emitter::EventIdentifier, events::{self, TimedEvent},
 };
 
 #[derive(Serialize)]
@@ -71,4 +71,5 @@ pub struct MatchResult {
     pub winner: String,
     pub points: u8,
     pub ranked: HashMap<String, u8>,
+    pub event_log: Vec<TimedEvent<events::SchnapsenDuoEventType>>
 }
