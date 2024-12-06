@@ -10,7 +10,7 @@ use lapin::{
     types::FieldTable,
     BasicProperties,
 };
-use models::{CreateMatch, GameMode, GameServer, MatchCreated, MatchResult};
+use models::{CreateMatch, GameMode, GameServer, MatchCreated, MatchResult, Ranking};
 use schnapsen_rs::{PublicEvent, SchnapsenDuo};
 use socketioxide::{
     extract::{Data, SocketRef},
@@ -18,8 +18,7 @@ use socketioxide::{
     SocketIo,
 };
 use std::{
-    hash::{Hash, Hasher},
-    sync::{Arc, Mutex},
+    collections::HashMap, hash::{Hash, Hasher}, sync::{Arc, Mutex}
 };
 use tower::ServiceBuilder;
 use tower_http::{
@@ -74,12 +73,19 @@ fn setup_match_result_handler(
             ranked,
         } = event
         {
+            let (loser, loser_points) = ranked.iter().find(|(k, _)| **k != winner).unwrap();
+
             let result = MatchResult {
                 match_id: created_match.read.clone(),
-                winner,
-                points,
-                ranked,
+                winners: HashMap::from_iter(vec![(winner.clone(), points)]),
+                losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
                 event_log: match_manager.get_event_log(),
+                ranking: Ranking {
+                    performances: HashMap::from_iter(vec![
+                        (winner.clone(), vec!["win".to_string()]),
+                        (loser.clone(), vec!["lose".to_string()]),
+                    ]),
+                },
             };
 
             notify_match_result(channel.clone(), result);

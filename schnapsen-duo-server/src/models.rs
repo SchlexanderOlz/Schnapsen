@@ -66,10 +66,15 @@ pub struct Timeout {
 }
 
 #[derive(Serialize, Debug, Clone)]
+pub struct Ranking {
+    pub performances: HashMap<String, Vec<String>>,
+}
+
+#[derive(Serialize, Debug, Clone)]
 pub struct MatchResult {
     pub match_id: String,
-    pub winner: String,
-    pub points: u8,
-    pub ranked: HashMap<String, u8>,
+    pub winners: HashMap<String, u8>,
+    pub losers: HashMap<String, u8>,
+    pub ranking: Ranking,
     pub event_log: Vec<TimedEvent<events::SchnapsenDuoEventType>>
 }
