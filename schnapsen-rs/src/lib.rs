@@ -416,7 +416,7 @@ impl SchnapsenDuo {
     pub fn recreate_deck(&mut self) {
         self.deck = Self::populate_deck().into();
         self.players.iter().for_each(|player| {
-            player.as_ref().write().unwrap().reset();
+            player.as_ref().try_write().unwrap().reset();
         });
     }
 
@@ -433,7 +433,7 @@ impl SchnapsenDuo {
         let mut callbacks = Vec::new();
         for player in player_order.clone() {
             for _ in 0..3 {
-                callbacks.extend(self.do_cards(&mut player.write().unwrap()));
+                callbacks.extend(self.do_cards(&mut player.try_write().unwrap()));
             }
         }
         let trump = self.deck.pop().unwrap();
@@ -442,7 +442,7 @@ impl SchnapsenDuo {
 
         for player in player_order.clone() {
             for _ in 0..2 {
-                callbacks.extend(self.do_cards(&mut player.write().unwrap()));
+                callbacks.extend(self.do_cards(&mut player.try_write().unwrap()));
             }
         }
 
@@ -696,7 +696,7 @@ impl SchnapsenDuo {
         player: Arc<RwLock<Player>>,
     ) -> Vec<tokio::task::JoinHandle<()>> {
         let (callbacks, announcable) = self.notify_announcable_props(&player.read().unwrap());
-        player.write().unwrap().announcable = announcable;
+        player.try_write().unwrap().announcable = announcable;
         callbacks
     }
 
@@ -768,7 +768,7 @@ impl SchnapsenDuo {
     fn update_swap_trump(&self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
         let (callbacks, can_swap) = self.notify_swap_trump_check(&player.read().unwrap());
 
-        player.write().unwrap().possible_trump_swap = can_swap;
+        player.try_write().unwrap().possible_trump_swap = can_swap;
 
         let player_read = player.read().unwrap();
         if player_read.possible_trump_swap.is_some() {
@@ -908,7 +908,7 @@ impl SchnapsenDuo {
             points = 1;
         }
 
-        winner.player.write().unwrap().points += points;
+        winner.player.try_write().unwrap().points += points;
 
         let mut ranked = HashMap::new();
         {
@@ -924,8 +924,8 @@ impl SchnapsenDuo {
             ranked,
         });
 
-        winner.player.write().unwrap().reset();
-        loser.player.write().unwrap().reset();
+        winner.player.try_write().unwrap().reset();
+        loser.player.try_write().unwrap().reset();
 
         if self
             .players
@@ -1060,7 +1060,7 @@ impl SchnapsenDuo {
         self.closed_talon = None;
         self.taken_trump = None;
         self.players.iter().for_each(|player| {
-            player.write().unwrap().reset();
+            player.try_write().unwrap().reset();
         });
 
         self.recreate_deck();
@@ -1126,7 +1126,7 @@ impl SchnapsenDuo {
         let callbacks =
             self.notify_changes_playable_cards(&player.read().unwrap(), &playable_cards);
 
-        player.write().unwrap().playable_cards = playable_cards.to_vec();
+        player.try_write().unwrap().playable_cards = playable_cards.to_vec();
 
         callbacks
     }

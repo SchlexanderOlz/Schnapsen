@@ -1,4 +1,3 @@
-use rbtree::RBTree;
 use serde::Serialize;
 use std::{
     cmp::Ordering,

@@ -40,7 +40,6 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("timeout", async () => {
       console.log("Timeout");
-      client = null as any;
     })
 
     client.on("finished_distribution", async () => {

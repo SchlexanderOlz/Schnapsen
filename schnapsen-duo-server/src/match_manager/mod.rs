@@ -49,7 +49,7 @@ impl WriteMatchManager {
 
         let io = io.clone();
         let instance = Arc::new(std::sync::Mutex::new(SchnapsenDuo::new(
-            write.as_slice().try_into().unwrap(),
+            new_match.players.as_slice().try_into().unwrap(),
         )));
 
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -221,9 +221,23 @@ impl WriteMatchManager {
 
     async fn setup_private_access(
         self: Arc<Self>,
-        player_id: &str,
+        write: &str,
         socket: Arc<tokio::sync::Mutex<SocketRef>>,
     ) {
+        let player_id = self.meta.player_write.iter().find_map(|(k, v)| {
+            if v == write {
+                Some(k)
+            } else {
+                None
+            }
+        }).cloned();
+
+        if player_id.is_none() {
+            return;
+        }
+
+        let player_id = player_id.as_ref().unwrap();
+
         self.write_connected
             .write()
             .unwrap()

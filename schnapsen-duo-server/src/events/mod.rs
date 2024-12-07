@@ -62,7 +62,7 @@ where
     fn from(event: T) -> Self {
         Self {
             event,
-            timestamp: chrono::Utc::now().timestamp() as u64,
+            timestamp: chrono::Utc::now().timestamp_micros() as u64,
         }
     }
 }
