@@ -10,7 +10,7 @@ use lapin::{
     types::FieldTable,
     BasicProperties,
 };
-use models::{CreateMatch, GameMode, GameServer, MatchCreated, MatchResult, Ranking};
+use models::{CreateMatch, GameServer, MatchCreated, MatchResult, Ranking};
 use schnapsen_rs::{PublicEvent, SchnapsenDuo};
 use socketioxide::{
     extract::{Data, SocketRef},
@@ -209,14 +209,11 @@ async fn register_server(
     let server_info = GameServer {
         region,
         game: "Schnapsen".to_string(),
-        mode: GameMode {
-            name: "duo".to_string(),
-            player_count: 2,
-            computer_lobby: false,
-        },
+        mode: "duo".to_string(),
         server_pub: public_url,
         server_priv: private_url,
-        token: "token".to_string(),
+        max_players: 2,
+        min_players: 2,
         ranking_conf: models::RankingConf {
             max_stars: 5000,
             description: "Schnapsen Duo".to_string(),

@@ -20,6 +20,22 @@ services:
       - PRIVATE_ADDR=${SCHNAPSEN_DUO_PRIVATE_ADDR}
       - AMQP_URL=${AMQP_URL}
       - REGION=${REGION}
+    
+  schnapsen-ai-client:
+    build:
+      context: ./schnapsen-ai-client
+      dockerfile: Dockerfile.dev
+    container_name: schnapsen-ai-client
+    command: bun run index.ts
+    restart: on-failure
+    networks:
+      - game-night-network
+    environment:
+      - AMQP_URL=${AMQP_URL}
+      - SCHNAPSEN_AI_MODEL_URL=${SCHNAPSEN_AI_MODEL_URL}
+      - SCHNAPSEN_AI_TOKEN=${SCHNAPSEN_AI_TOKEN}
+
+
 
 networks:
   game-night-network:

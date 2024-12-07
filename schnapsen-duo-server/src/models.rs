@@ -26,33 +26,30 @@ pub struct RankingConf {
 pub struct GameServer {
     pub region: String,
     pub game: String,
-    pub mode: GameMode,
+    pub mode: String,
     pub server_priv: String,
     pub server_pub: String,
-    pub token: String, // Token to authorize as the main-server at this game-server
-
+    pub min_players: u32,
+    pub max_players: u32,
     pub ranking_conf: RankingConf,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct GameMode {
-    pub name: String,
-    pub player_count: u32,
-    pub computer_lobby: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct CreateMatch {
     pub game: String,
     pub players: Vec<String>,
-    pub mode: GameMode,
+    pub ai_players: Vec<String>,
+    pub mode: String,
+    pub ai: bool,
 }
 
 #[derive(Serialize, Debug, Clone)]
 pub struct MatchCreated {
     pub player_write: HashMap<String, String>,
     pub game: String,
-    pub mode: GameMode,
+    pub mode: String,
+    pub ai: bool,
+    pub ai_players: Vec<String>,
     pub read: String,
     pub url_pub: String,
     pub url_priv: String,

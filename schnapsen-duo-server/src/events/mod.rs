@@ -82,6 +82,7 @@ impl EventIdentifier for schnapsen_rs::PrivateEvent {
             schnapsen_rs::PrivateEvent::AllowCloseTalon => "allow_close_talon",
             schnapsen_rs::PrivateEvent::CannotAnnounce(_) => "cannot_announce",
             schnapsen_rs::PrivateEvent::TrumpChangeImpossible(_) => "trump_change_impossible",
+            schnapsen_rs::PrivateEvent::AllowSwapTrump => "allow_swap_trump",
         }
     }
 }

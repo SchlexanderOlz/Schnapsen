@@ -110,6 +110,7 @@ pub enum PrivateEvent {
     AllowDrawCard,
     AllowAnnounce,
     AllowCloseTalon,
+    AllowSwapTrump,
 }
 
 // TODO: Alle user_ids are currently serialized as the write-tokens. This has to be changed. SECURITY RISK
@@ -285,7 +286,10 @@ impl SchnapsenDuo {
         self.active.as_ref().unwrap().read().unwrap().id == player.id
     }
 
-    pub fn draw_card_after_trick(&mut self, player: Arc<RwLock<Player>>) -> Result<Card, PlayerError> {
+    pub fn draw_card_after_trick(
+        &mut self,
+        player: Arc<RwLock<Player>>,
+    ) -> Result<Card, PlayerError> {
         let player = &player.read().unwrap();
         if !self.is_active(player) {
             return Err(PlayerError::PlayerNotActive);
@@ -520,7 +524,11 @@ impl SchnapsenDuo {
         Ok(())
     }
 
-    pub fn swap_trump(&mut self, player: Arc<RwLock<Player>>, card: Card) -> Result<Card, PlayerError> {
+    pub fn swap_trump(
+        &mut self,
+        player: Arc<RwLock<Player>>,
+        card: Card,
+    ) -> Result<Card, PlayerError> {
         let player = &player.read().unwrap();
         if let Some(swap) = self.can_swap_trump(player) {
             if *swap != card {
@@ -757,12 +765,18 @@ impl SchnapsenDuo {
         (callbacks, announcable)
     }
 
-    fn update_swap_trump(
-        &self,
-        player: Arc<RwLock<Player>>,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
+    fn update_swap_trump(&self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
         let (callbacks, can_swap) = self.notify_swap_trump_check(&player.read().unwrap());
+
         player.write().unwrap().possible_trump_swap = can_swap;
+
+        let player_read = player.read().unwrap();
+        if player_read.possible_trump_swap.is_some() {
+            self.notify_priv(
+                player_read.id.clone(),
+                PrivateEvent::AllowSwapTrump,
+            );
+        }
         callbacks
     }
 
@@ -798,7 +812,6 @@ impl SchnapsenDuo {
         if self.active.is_none() || Arc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return;
         }
-
 
         let user_id = self.active.as_deref().unwrap().read().unwrap().id.clone();
         self.notify_pub(PublicEvent::Inactive {
@@ -1011,7 +1024,7 @@ impl SchnapsenDuo {
 
         let cards = [self.stack.pop().unwrap(), self.stack.pop().unwrap()];
 
-        won.write().unwrap().tricks.push(cards);
+        won.try_write().unwrap().tricks.push(cards);
 
         self.update_finish_round(won.clone())?;
 
@@ -1021,7 +1034,7 @@ impl SchnapsenDuo {
             self.notify_priv(won_id.clone(), PrivateEvent::AllowDrawCard);
         } else {
             if won.read().unwrap().announcable.len() > 0 {
-                self.notify_priv(won.read().unwrap().id.clone(), PrivateEvent::AllowAnnounce);
+                self.notify_priv(won_id.clone(), PrivateEvent::AllowAnnounce);
             }
             self.notify_priv(won_id, PrivateEvent::AllowPlayCard);
         }

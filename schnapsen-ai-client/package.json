@@ -1,0 +1,17 @@
+{
+  "name": "schnapsen-ai-client",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@types/amqplib": "^0.10.6",
+    "amqplib": "^0.10.5",
+    "gn-matchmaker-client": "0.1.30",
+    "gn-schnapsen-client": "^0.1.30"
+  }
+}

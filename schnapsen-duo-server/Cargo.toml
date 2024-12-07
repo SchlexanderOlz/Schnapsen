@@ -15,7 +15,7 @@ socketioxide = "0.14.1"
 tokio = { version = "1.38.1", features = ["rt", "macros", "rt-multi-thread"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
-schnapsen-rs = "0.1.47"
+schnapsen-rs = "0.1.61"
 num_enum = "0.7.3"
 thiserror = "1.0.63"
 sha2 = "0.10.8"
@@ -27,3 +27,6 @@ futures-lite = "2.5.0"
 uuid = { version = "1.11.0", features = ["v4"] }
 rbtree = "0.2.0"
 chrono = "0.4.38"
+
+[patch.crates-io]
+schnapsen-rs = { path = "../schnapsen-rs" }
