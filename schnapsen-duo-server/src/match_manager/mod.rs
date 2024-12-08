@@ -10,6 +10,7 @@ use std::{
 
 use futures::{lock::Mutex, task};
 use schnapsen_rs::{PrivateEvent, PublicEvent, SchnapsenDuo};
+use serde::Serialize;
 use socketioxide::{
     extract::{Data, SocketRef},
     socket::DisconnectReason,
@@ -25,7 +26,7 @@ use tracing::error;
 use crate::{
     emitter,
     events::{event_logger, EventType, SchnapsenDuoEventType, TimedEvent},
-    models::{CreateMatch, MatchCreated, Timeout},
+    models::{CreateMatch, MatchAbruptClose, MatchCreated, MatchError, MatchResult, Ranking, Timeout},
     performer, translator,
 };
 const PUBLIC_EVENT_ROOM: &str = "public-events";
@@ -40,6 +41,7 @@ pub struct WriteMatchManager {
     logger: Arc<std::sync::Mutex<event_logger::EventLogger<SchnapsenDuoEventType>>>,
     exited: AtomicI8,
     started: AtomicBool,
+    on_exit_callbacks: std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
 }
 
 impl WriteMatchManager {
@@ -89,6 +91,7 @@ impl WriteMatchManager {
             exited: AtomicI8::new(0),
             started: AtomicBool::new(false),
             awaiting_reconnection: std::sync::Mutex::new(HashMap::new()),
+            on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
         });
 
         {
@@ -97,6 +100,9 @@ impl WriteMatchManager {
                 new.setup_read_ns(socket)
             });
         }
+
+        new.clone().setup_match_result_handler();
+        new.clone().await_initial_connection();
 
         // TODO: The created match should be added to some active-state
         new
@@ -115,6 +121,69 @@ impl WriteMatchManager {
     #[inline]
     pub fn get_event_log(&self) -> Vec<TimedEvent<SchnapsenDuoEventType>> {
         self.logger.lock().unwrap().all().into_iter().cloned().collect()
+    }
+
+    pub fn on_exit<F>(self: Arc<Self>, callback: F)
+    where
+        F: FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync + 'static,
+    {
+        self.on_exit_callbacks.lock().unwrap().push(Box::new(callback));
+    }
+
+    fn exit(self: Arc<Self>, reason: Result<MatchResult, MatchError>) {
+        if self.exited.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            return;
+        }
+
+        let reason = reason.map_err(|err| {
+            MatchAbruptClose {
+                match_id: self.meta.read.clone(),
+                reason: err,
+            }
+        });
+
+        self.exited.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        for callback in self.on_exit_callbacks.lock().unwrap().drain(..) {
+            callback(reason.clone());
+        }
+    }
+
+    fn await_initial_connection(self: Arc<Self>) {
+        for player in self.meta.player_write.keys() {
+            let (tx, rx) = watch::channel(false);
+            self.awaiting_reconnection.lock().unwrap().insert(player.clone(), tx);
+            tokio::spawn(self.clone().await_timeout(rx, player.clone()));
+        }
+    }
+
+    fn setup_match_result_handler(self: Arc<Self>) {
+        self.clone().instance.lock().unwrap().on_pub_event(move |event| {
+            // TODO|POTERROR: Change this to final result
+            if let PublicEvent::Result {
+                winner,
+                points,
+                ranked,
+            } = event
+            {
+                let (loser, loser_points) = ranked.iter().find(|(k, _)| **k != winner).unwrap();
+
+                let result = MatchResult {
+                    match_id: self.meta.read.clone(),
+                    winners: HashMap::from_iter(vec![(winner.clone(), points)]),
+                    losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
+                    event_log: self.get_event_log(),
+                    ranking: Ranking {
+                        performances: HashMap::from_iter(vec![
+                            (winner.clone(), vec!["win".to_string()]),
+                            (loser.clone(), vec!["lose".to_string()]),
+                        ]),
+                    },
+                };
+
+                self.clone().exit(Ok(result));
+            }
+        });
+
     }
 
     async fn play_card_or_timeout(self: Arc<Self>, event: PrivateEvent, player_id: String) {
@@ -143,8 +212,16 @@ impl WriteMatchManager {
         select! {
             _ = rx.changed() => {}
             _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
-                self.exited.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 self.clone().timeout_player(player_id.clone());
+
+                if !self.started.load(std::sync::atomic::Ordering::SeqCst) {
+                    self.exit(Err(MatchError::PlayerDidNotJoin(player_id)));
+                    return;
+                }
+
+                if self.write_connected.read().unwrap().is_empty() {
+                    self.exit(Err(MatchError::AllPlayersDisconnected));
+                }
             }
         };
     }
@@ -342,12 +419,7 @@ impl WriteMatchManager {
             .unwrap()
             .insert(player_id.clone(), tx);
 
-        select! {
-            _ = rx.changed() => {}
-            _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
-                self.timeout_player(player_id.clone());
-            }
-        }
+            self.await_timeout(rx, player_id).await;
     }
 
     async fn handle_auth(

@@ -75,3 +75,15 @@ pub struct MatchResult {
     pub ranking: Ranking,
     pub event_log: Vec<TimedEvent<events::SchnapsenDuoEventType>>
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub enum MatchError {
+    AllPlayersDisconnected,
+    PlayerDidNotJoin(String),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MatchAbruptClose {
+    pub match_id: String,
+    pub reason: MatchError,
+}

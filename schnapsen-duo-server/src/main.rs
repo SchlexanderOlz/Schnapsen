@@ -1,5 +1,4 @@
 use axum::{self, routing};
-use events::{event_logger, SchnapsenDuoEventType};
 use futures::{io::ReadToString, StreamExt};
 use lapin::{
     options::{
@@ -10,15 +9,16 @@ use lapin::{
     types::FieldTable,
     BasicProperties,
 };
-use models::{CreateMatch, GameServer, MatchCreated, MatchResult, Ranking};
-use schnapsen_rs::{PublicEvent, SchnapsenDuo};
+use models::{CreateMatch, GameServer, MatchAbruptClose, MatchResult};
 use socketioxide::{
     extract::{Data, SocketRef},
     socket::Socket,
     SocketIo,
 };
 use std::{
-    collections::HashMap, hash::{Hash, Hasher}, sync::{Arc, Mutex}
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    sync::{Arc, Mutex},
 };
 use tower::ServiceBuilder;
 use tower_http::{
@@ -37,59 +37,55 @@ mod translator;
 
 const CREATE_MATCH_QUEUE: &str = "match-created";
 const RESULT_MATCH_QUEUE: &str = "match-result";
+const MATCH_ABRUPT_CLOSE_QUEUE: &str = "match-abrupt-close";
 const CREATE_GAME_QUEUE: &str = "game-created";
 const CREATE_MATCH_REQUEST_QUEUE: &str = "match-create-request";
 const HEALTH_CHECK_QUEUE: &str = "health-check";
 
-fn notify_match_result(channel: Arc<lapin::Channel>, result: MatchResult) {
+async fn notify_match_close(channel: Arc<lapin::Channel>, reason: MatchAbruptClose) {
+    debug!("Notifying match result: {:?}", reason);
+    let channel = channel.clone();
+    channel
+        .basic_publish(
+            "",
+            MATCH_ABRUPT_CLOSE_QUEUE,
+            BasicPublishOptions::default(),
+            &serde_json::to_vec(&reason).unwrap(),
+            BasicProperties::default(),
+        )
+        .await
+        .unwrap();
+}
+
+async fn notify_match_result(channel: Arc<lapin::Channel>, result: MatchResult) {
     debug!("Notifying match result: {:?}", result);
     let channel = channel.clone();
-    tokio::spawn(async move {
-        channel
-            .basic_publish(
-                "",
-                RESULT_MATCH_QUEUE,
-                BasicPublishOptions::default(),
-                &serde_json::to_vec(&result).unwrap(),
-                BasicProperties::default(),
-            )
-            .await
-            .unwrap();
-    });
+    channel
+        .basic_publish(
+            "",
+            RESULT_MATCH_QUEUE,
+            BasicPublishOptions::default(),
+            &serde_json::to_vec(&result).unwrap(),
+            BasicProperties::default(),
+        )
+        .await
+        .unwrap();
 }
 
 fn setup_match_result_handler(
-    instance: Arc<Mutex<SchnapsenDuo>>,
     channel: Arc<lapin::Channel>,
-    created_match: MatchCreated,
     match_manager: Arc<match_manager::WriteMatchManager>,
 ) {
     let channel = channel.clone();
-    instance.lock().unwrap().on_pub_event(move |event| {
-        // TODO|POTERROR: Change this to final result
-        if let PublicEvent::Result {
-            winner,
-            points,
-            ranked,
-        } = event
-        {
-            let (loser, loser_points) = ranked.iter().find(|(k, _)| **k != winner).unwrap();
 
-            let result = MatchResult {
-                match_id: created_match.read.clone(),
-                winners: HashMap::from_iter(vec![(winner.clone(), points)]),
-                losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
-                event_log: match_manager.get_event_log(),
-                ranking: Ranking {
-                    performances: HashMap::from_iter(vec![
-                        (winner.clone(), vec!["win".to_string()]),
-                        (loser.clone(), vec!["lose".to_string()]),
-                    ]),
-                },
-            };
-
-            notify_match_result(channel.clone(), result);
-        }
+    match_manager.on_exit(move |event| {
+        tokio::spawn(async move {
+            if let Ok(result) = event {
+                notify_match_result(channel.clone(), result).await;
+            } else if let Err(reason) = event {
+                notify_match_close(channel.clone(), reason).await;
+            }
+        });
     });
 }
 
@@ -146,14 +142,8 @@ async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>
         tokio::spawn(async move {
             let match_manager = on_create(new_match.clone());
             let created_match = match_manager.get_meta().clone();
-            let instance = match_manager.get_match();
 
-            setup_match_result_handler(
-                instance,
-                channel.clone(),
-                created_match.clone(),
-                match_manager,
-            );
+            setup_match_result_handler(channel.clone(), match_manager);
 
             debug!("Created match: {:?}", created_match);
             channel
