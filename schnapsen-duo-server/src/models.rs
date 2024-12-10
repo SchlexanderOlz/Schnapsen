@@ -87,3 +87,51 @@ pub struct MatchAbruptClose {
     pub match_id: String,
     pub reason: MatchError,
 }
+
+impl Into<gn_communicator::models::MatchAbrubtClose> for MatchAbruptClose {
+    fn into(self) -> gn_communicator::models::MatchAbrubtClose {
+        gn_communicator::models::MatchAbrubtClose {
+            match_id: self.match_id,
+            reason: match self.reason {
+                MatchError::AllPlayersDisconnected => gn_communicator::models::MatchError::AllPlayersDisconnected,
+                MatchError::PlayerDidNotJoin(player_id) => gn_communicator::models::MatchError::PlayerDidNotJoin(player_id),
+            }
+        }
+    }
+}
+
+impl Into<gn_communicator::models::MatchResult> for MatchResult {
+    fn into(self) -> gn_communicator::models::MatchResult {
+        gn_communicator::models::MatchResult {
+            match_id: self.match_id,
+            winners: self.winners,
+            losers: self.losers,
+            ranking: self.ranking.into(),
+            event_log: self.event_log.into_iter().map(|event| serde_json::to_value(&event).unwrap()).collect(),
+        }
+    }
+}
+
+impl Into<gn_communicator::models::Ranking> for Ranking {
+    fn into(self) -> gn_communicator::models::Ranking {
+        gn_communicator::models::Ranking {
+            performances: self.performances,
+        }
+    }
+}
+
+impl Into<gn_communicator::models::CreatedMatch> for MatchCreated {
+    fn into(self) -> gn_communicator::models::CreatedMatch {
+        gn_communicator::models::CreatedMatch {
+            player_write: self.player_write,
+            game: self.game,
+            mode: self.mode,
+            ai: self.ai,
+            ai_players: self.ai_players,
+            read: self.read,
+            url_pub: self.url_pub,
+            url_priv: self.url_priv,
+            region: self.region,
+        }
+    }
+}

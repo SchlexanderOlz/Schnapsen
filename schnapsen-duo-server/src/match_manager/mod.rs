@@ -45,7 +45,7 @@ pub struct WriteMatchManager {
 }
 
 impl WriteMatchManager {
-    pub fn create(io: Arc<SocketIo>, new_match: CreateMatch) -> Arc<Self> {
+    pub fn create(io: Arc<SocketIo>, new_match: gn_communicator::models::CreateMatch) -> Arc<Self> {
         debug!("Creating new match: {:?}", new_match);
         let write = new_match.players.clone();
 
@@ -267,7 +267,7 @@ impl WriteMatchManager {
 
     fn setup_event_log(
         instance: Arc<std::sync::Mutex<SchnapsenDuo>>,
-        new_match: &CreateMatch,
+        new_match: &gn_communicator::models::CreateMatch,
     ) -> Arc<std::sync::Mutex<event_logger::EventLogger<SchnapsenDuoEventType>>> {
         let logger = Arc::new(std::sync::Mutex::new(event_logger::EventLogger::new()));
         {

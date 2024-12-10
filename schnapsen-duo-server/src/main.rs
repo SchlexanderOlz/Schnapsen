@@ -1,25 +1,8 @@
 use axum::{self, routing};
-use futures::{io::ReadToString, StreamExt};
-use lapin::{
-    options::{
-        BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, QueueDeclareOptions,
-        QueuePurgeOptions,
-    },
-    protocol::channel,
-    types::FieldTable,
-    BasicProperties,
-};
-use models::{CreateMatch, GameServer, MatchAbruptClose, MatchResult};
-use socketioxide::{
-    extract::{Data, SocketRef},
-    socket::Socket,
-    SocketIo,
-};
-use std::{
-    collections::HashMap,
-    hash::{Hash, Hasher},
-    sync::{Arc, Mutex},
-};
+use gn_communicator::{rabbitmq::RabbitMQCommunicator, Communicator};
+use lazy_static::lazy_static;
+use socketioxide::SocketIo;
+use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -35,168 +18,68 @@ mod models;
 mod performer;
 mod translator;
 
-const CREATE_MATCH_QUEUE: &str = "match-created";
-const RESULT_MATCH_QUEUE: &str = "match-result";
-const MATCH_ABRUPT_CLOSE_QUEUE: &str = "match-abrupt-close";
-const CREATE_GAME_QUEUE: &str = "game-created";
-const CREATE_MATCH_REQUEST_QUEUE: &str = "match-create-request";
-const HEALTH_CHECK_QUEUE: &str = "health-check";
+lazy_static! {
+    static ref communicator: RabbitMQCommunicator = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(RabbitMQCommunicator::connect(
+            std::env::var("AMQP_URL")
+                .expect("AMQP_URL must be set")
+                .as_str()
+        ));
+}
 
-async fn notify_match_close(channel: Arc<lapin::Channel>, reason: MatchAbruptClose) {
+async fn notify_match_close(reason: gn_communicator::models::MatchAbrubtClose) {
     debug!("Notifying match result: {:?}", reason);
-    let channel = channel.clone();
-    channel
-        .basic_publish(
-            "",
-            MATCH_ABRUPT_CLOSE_QUEUE,
-            BasicPublishOptions::default(),
-            &serde_json::to_vec(&reason).unwrap(),
-            BasicProperties::default(),
-        )
-        .await
-        .unwrap();
+    communicator.report_match_abrupt_close(&reason).await;
 }
 
-async fn notify_match_result(channel: Arc<lapin::Channel>, result: MatchResult) {
+async fn notify_match_result(result: gn_communicator::models::MatchResult) {
     debug!("Notifying match result: {:?}", result);
-    let channel = channel.clone();
-    channel
-        .basic_publish(
-            "",
-            RESULT_MATCH_QUEUE,
-            BasicPublishOptions::default(),
-            &serde_json::to_vec(&result).unwrap(),
-            BasicProperties::default(),
-        )
-        .await
-        .unwrap();
+    communicator.report_match_result(&result).await;
 }
 
-fn setup_match_result_handler(
-    channel: Arc<lapin::Channel>,
-    match_manager: Arc<match_manager::WriteMatchManager>,
-) {
-    let channel = channel.clone();
-
+fn setup_match_result_handler(match_manager: Arc<match_manager::WriteMatchManager>) {
     match_manager.on_exit(move |event| {
         tokio::spawn(async move {
             if let Ok(result) = event {
-                notify_match_result(channel.clone(), result).await;
+                notify_match_result(result.into()).await;
             } else if let Err(reason) = event {
-                notify_match_close(channel.clone(), reason).await;
+                notify_match_close(reason.into()).await;
             }
         });
     });
 }
 
-async fn listen_for_match_create(channel: Arc<lapin::Channel>, io: Arc<SocketIo>) {
+async fn listen_for_match_create(io: Arc<SocketIo>) {
     info!("Listening for match create requests");
-    channel
-        .queue_declare(
-            CREATE_MATCH_REQUEST_QUEUE,
-            QueueDeclareOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
-    channel
-        .queue_declare(
-            CREATE_MATCH_QUEUE,
-            QueueDeclareOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
-
-    channel
-        .queue_declare(
-            RESULT_MATCH_QUEUE,
-            QueueDeclareOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
-
-    let on_create = move |new_match: CreateMatch| {
+    let on_create = move |new_match: gn_communicator::models::CreateMatch| {
         match_manager::WriteMatchManager::create(io.clone(), new_match)
     };
 
-    let public_url = std::env::var("PUBLIC_ADDR").expect("SCHNAPSEN_DUO_PUBLIC_ADDR must be set");
-    let mut consumer = channel
-        .basic_consume(
-            CREATE_MATCH_REQUEST_QUEUE,
-            format!("schnapsen-duo-server@{}", public_url).as_str(),
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
+    communicator
+        .on_match_create(move |new_match: gn_communicator::models::CreateMatch| {
+            let on_create = on_create.clone();
+            async move {
+                let match_manager = on_create(new_match.clone());
+                let created_match = match_manager.get_meta().clone();
 
-    while let Some(delivery) = consumer.next().await {
-        let on_create = on_create.clone();
-        let channel = channel.clone();
-        let delivery = delivery.expect("error in consumer");
-        delivery.ack(BasicAckOptions::default()).await.expect("ack");
-        let new_match: CreateMatch = serde_json::from_slice(&delivery.data).unwrap();
+                setup_match_result_handler(match_manager);
 
-        tokio::spawn(async move {
-            let match_manager = on_create(new_match.clone());
-            let created_match = match_manager.get_meta().clone();
-
-            setup_match_result_handler(channel.clone(), match_manager);
-
-            debug!("Created match: {:?}", created_match);
-            channel
-                .basic_publish(
-                    "",
-                    CREATE_MATCH_QUEUE,
-                    BasicPublishOptions::default(),
-                    &serde_json::to_vec(&created_match).unwrap(),
-                    BasicProperties::default(),
-                )
-                .await
-                .unwrap();
-            debug!(
-                "Published match to queue({:?}): {:?}",
-                CREATE_MATCH_QUEUE, created_match
-            );
-        });
-    }
+                communicator
+                    .report_match_created(&created_match.into())
+                    .await;
+            }
+        })
+        .await;
 }
 
-async fn register_server(
-    channel: Arc<lapin::Channel>,
-) -> Result<String, Box<dyn std::error::Error>> {
-    channel
-        .queue_declare(
-            CREATE_GAME_QUEUE,
-            QueueDeclareOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
-
+async fn register_server() -> Result<String, Box<dyn std::error::Error>> {
     let public_url = std::env::var("PUBLIC_ADDR").expect("SCHNAPSEN_DUO_PUBLIC_ADDR must be set");
     let private_url =
         std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
     let region = std::env::var("REGION").expect("REGION must be set");
 
-    let reply_to = channel
-        .queue_declare("", QueueDeclareOptions::default(), FieldTable::default())
-        .await
-        .unwrap();
-
-    let mut consumer = channel
-        .basic_consume(
-            reply_to.name().as_str(),
-            format!("schnapsen-duo-server-uuid-receive@{}", public_url).as_str(),
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
-
-    let server_info = GameServer {
+    let server_info = gn_communicator::models::GameServerCreate {
         region,
         game: "Schnapsen".to_string(),
         mode: "duo".to_string(),
@@ -204,15 +87,15 @@ async fn register_server(
         server_priv: private_url,
         max_players: 2,
         min_players: 2,
-        ranking_conf: models::RankingConf {
+        ranking_conf: gn_communicator::models::RankingConf {
             max_stars: 5000,
             description: "Schnapsen Duo".to_string(),
             performances: vec![
-                models::Performance {
+                gn_communicator::models::Performance {
                     name: "win".to_string(),
                     weight: 1,
                 },
-                models::Performance {
+                gn_communicator::models::Performance {
                     name: "lose".to_string(),
                     weight: -1,
                 },
@@ -220,58 +103,16 @@ async fn register_server(
         },
     };
 
-    channel
-        .basic_publish(
-            "",
-            CREATE_GAME_QUEUE,
-            BasicPublishOptions::default(),
-            &serde_json::to_vec(&server_info).unwrap(),
-            BasicProperties::default()
-                .with_reply_to(reply_to.name().clone())
-                .with_correlation_id(uuid::Uuid::new_v4().to_string().into()),
-        )
-        .await
-        .unwrap();
-
-    while let Some(delivery) = consumer.next().await {
-        let delivery = delivery.unwrap();
-        delivery.ack(BasicAckOptions::default()).await.expect("ack");
-
-        let server_id = std::string::String::from_utf8(delivery.data).unwrap();
-        channel
-            .queue_purge(reply_to.name().as_str(), QueuePurgeOptions::default())
-            .await
-            .unwrap();
-        return Ok(server_id);
-    }
-    Err("No server id was received".into())
+    Ok(communicator.create_game(&server_info).await?)
 }
 
-async fn health_check(channel: Arc<lapin::Channel>, id: String) {
-    channel
-        .basic_publish(
-            "",
-            HEALTH_CHECK_QUEUE,
-            BasicPublishOptions::default(),
-            id.as_bytes(),
-            BasicProperties::default(),
-        )
-        .await
-        .unwrap();
+async fn health_check(id: String) {
+    communicator.send_health_check(id).await;
 }
 
-async fn run_health_check(channel: Arc<lapin::Channel>, id: String) {
-    channel
-        .queue_declare(
-            HEALTH_CHECK_QUEUE,
-            QueueDeclareOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .unwrap();
-
+async fn run_health_check(id: String) {
     loop {
-        health_check(channel.clone(), id.clone()).await;
+        health_check(id.clone()).await;
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     }
 }
@@ -287,22 +128,11 @@ async fn main() {
     let (layer, io) = socketioxide::SocketIo::new_layer();
     let io = Arc::new(io);
 
-    let amqp_url = std::env::var("AMQP_URL").expect("AMQP_URL must be set");
-    let amqp_conn = lapin::Connection::connect(&amqp_url, lapin::ConnectionProperties::default())
-        .await
-        .unwrap();
-
-    let channel = Arc::new(amqp_conn.create_channel().await.unwrap());
-
-    let uuid = register_server(channel.clone()).await.unwrap();
+    let uuid = register_server().await.unwrap();
     info!("Registered server as {:?}", uuid);
 
-    {
-        let channel = channel.clone();
-        tokio::spawn(listen_for_match_create(channel, io));
-    }
-
-    tokio::spawn(run_health_check(channel, uuid));
+    tokio::spawn(listen_for_match_create(io));
+    tokio::spawn(run_health_check(uuid));
 
     let host_url = std::env::var("HOST_ADDR").expect("HOST_ADDR must be set");
     let listener = tokio::net::TcpListener::bind(host_url.as_str())
