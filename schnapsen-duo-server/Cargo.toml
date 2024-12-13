@@ -25,8 +25,9 @@ tower-http = { version = "0.6.1", features = ["cors", "trace"] }
 futures-lite = "2.5.0"
 uuid = { version = "1.11.0", features = ["v4"] }
 chrono = "0.4.38"
-gn-communicator = "0.1.0"
+gn-communicator = "0.1.1"
 lazy_static = "1.5.0"
+async_once = "0.2.6"
 
 [patch.crates-io]
 schnapsen-rs = { path = "../schnapsen-rs" }

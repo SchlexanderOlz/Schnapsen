@@ -1,3 +1,4 @@
+use async_once::AsyncOnce;
 use axum::{self, routing};
 use gn_communicator::{rabbitmq::RabbitMQCommunicator, Communicator};
 use lazy_static::lazy_static;
@@ -19,23 +20,23 @@ mod performer;
 mod translator;
 
 lazy_static! {
-    static ref communicator: RabbitMQCommunicator = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(RabbitMQCommunicator::connect(
-            std::env::var("AMQP_URL")
-                .expect("AMQP_URL must be set")
-                .as_str()
-        ));
+    static ref communicator: AsyncOnce<RabbitMQCommunicator> = AsyncOnce::new(
+        RabbitMQCommunicator::connect(option_env!("AMQP_URL").unwrap())
+    );
 }
 
 async fn notify_match_close(reason: gn_communicator::models::MatchAbrubtClose) {
     debug!("Notifying match result: {:?}", reason);
-    communicator.report_match_abrupt_close(&reason).await;
+    communicator
+        .get()
+        .await
+        .report_match_abrupt_close(&reason)
+        .await;
 }
 
 async fn notify_match_result(result: gn_communicator::models::MatchResult) {
     debug!("Notifying match result: {:?}", result);
-    communicator.report_match_result(&result).await;
+    communicator.get().await.report_match_result(&result).await;
 }
 
 fn setup_match_result_handler(match_manager: Arc<match_manager::WriteMatchManager>) {
@@ -57,6 +58,8 @@ async fn listen_for_match_create(io: Arc<SocketIo>) {
     };
 
     communicator
+        .get()
+        .await
         .on_match_create(move |new_match: gn_communicator::models::CreateMatch| {
             let on_create = on_create.clone();
             async move {
@@ -66,6 +69,8 @@ async fn listen_for_match_create(io: Arc<SocketIo>) {
                 setup_match_result_handler(match_manager);
 
                 communicator
+                    .get()
+                    .await
                     .report_match_created(&created_match.into())
                     .await;
             }
@@ -103,11 +108,11 @@ async fn register_server() -> Result<String, Box<dyn std::error::Error>> {
         },
     };
 
-    Ok(communicator.create_game(&server_info).await?)
+    Ok(communicator.get().await.create_game(&server_info).await?)
 }
 
 async fn health_check(id: String) {
-    communicator.send_health_check(id).await;
+    communicator.get().await.send_health_check(id).await;
 }
 
 async fn run_health_check(id: String) {
