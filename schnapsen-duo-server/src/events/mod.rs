@@ -8,6 +8,7 @@ pub mod event_logger;
 
 
 #[derive(Serialize, Hash, Debug, PartialEq, Eq, Clone)]
+#[serde(untagged)]
 pub enum EventType<Prv, Pub> {
     Private(Prv),
     Public(Pub),

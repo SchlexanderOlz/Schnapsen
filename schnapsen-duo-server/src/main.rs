@@ -54,7 +54,7 @@ fn setup_match_result_handler(match_manager: Arc<match_manager::WriteMatchManage
 async fn listen_for_match_create(io: Arc<SocketIo>) {
     info!("Listening for match create requests");
     let on_create = move |new_match: gn_communicator::models::CreateMatch| {
-        match_manager::WriteMatchManager::create(io.clone(), new_match)
+        match_manager::WriteMatchManager::create(io.clone(), new_match, 2)
     };
 
     communicator
@@ -115,10 +115,11 @@ async fn health_check(id: String) {
     communicator.get().await.send_health_check(id).await;
 }
 
-async fn run_health_check(id: String) {
+async fn run_health_check(id: String) -> ! {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
     loop {
+        interval.tick().await;
         health_check(id.clone()).await;
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     }
 }
 

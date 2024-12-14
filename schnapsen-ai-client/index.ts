@@ -38,8 +38,8 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     console.log("Client initialized for match", task.read);
 
 
-    client.on("timeout", async () => {
-      console.log("Timeout");
+    client.on("timeout", async (timeout: any) => {
+      console.log("Timeout: ", timeout);
     })
 
     client.on("finished_distribution", async () => {

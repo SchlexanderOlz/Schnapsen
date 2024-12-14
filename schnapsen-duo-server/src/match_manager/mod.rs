@@ -13,7 +13,7 @@ use schnapsen_rs::{PrivateEvent, PublicEvent, SchnapsenDuo};
 use serde::Serialize;
 use socketioxide::{
     extract::{Data, SocketRef},
-    socket::DisconnectReason,
+    socket::{self, DisconnectReason},
     SocketIo,
 };
 use tokio::{
@@ -42,10 +42,11 @@ pub struct WriteMatchManager {
     exited: AtomicI8,
     started: AtomicBool,
     on_exit_callbacks: std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
+    min_players: usize,
 }
 
 impl WriteMatchManager {
-    pub fn create(io: Arc<SocketIo>, new_match: gn_communicator::models::CreateMatch) -> Arc<Self> {
+    pub fn create(io: Arc<SocketIo>, new_match: gn_communicator::models::CreateMatch, min_players: usize) -> Arc<Self> {
         debug!("Creating new match: {:?}", new_match);
         let write = new_match.players.clone();
 
@@ -92,6 +93,7 @@ impl WriteMatchManager {
             started: AtomicBool::new(false),
             awaiting_reconnection: std::sync::Mutex::new(HashMap::new()),
             on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
+            min_players,
         });
 
         {
@@ -187,8 +189,8 @@ impl WriteMatchManager {
     }
 
     async fn play_card_or_timeout(self: Arc<Self>, event: PrivateEvent, player_id: String) {
-        let (tx, rx) = watch::channel(false);
         if let PrivateEvent::AllowPlayCard = event {
+            let (tx, rx) = watch::channel(false);
             let player_id_copy = player_id.clone();
             let on_play_card = move |event| {
                 if let PublicEvent::PlayCard { user_id, card: _ } = event {
@@ -219,7 +221,7 @@ impl WriteMatchManager {
                     return;
                 }
 
-                if self.write_connected.read().unwrap().is_empty() {
+                if self.write_connected.read().unwrap().len() < self.min_players {
                     self.exit(Err(MatchError::AllPlayersDisconnected));
                 }
             }
@@ -251,18 +253,17 @@ impl WriteMatchManager {
 
         debug!("Timing out player: {:?}", player_id);
         for (k, sockets) in self.write_connected.read().unwrap().clone().into_iter() {
-            debug!("Telling all sockets of player: {:?}", k);
             for socket in sockets {
                 let timeout = timeout.clone();
                 tokio::task::spawn(async move {
-                    socket
-                        .lock()
-                        .await
+                    let lock = socket.lock().await;
+                    lock
                         .emit("timeout", timeout.clone())
                         .unwrap();
                 });
             }
         }
+        self.write_connected.write().unwrap().remove(&player_id);
     }
 
     fn setup_event_log(
@@ -394,14 +395,15 @@ impl WriteMatchManager {
             move |disconnected: SocketRef, reason: DisconnectReason| {
                 debug!("Player: {:?} disconnected", player_id);
 
-                let should_exit = {
+                let should_exit = 'exit: {
                     let mut lock = self.write_connected.write().unwrap();
-                    let sockets = lock.get_mut(&player_id).unwrap();
-
-                    sockets.retain(|socket| {
-                        tokio::task::block_in_place(|| socket.blocking_lock().id != disconnected.id)
-                    });
-                    sockets.len() == 0
+                    if let Some(sockets) = lock.get_mut(&player_id) {
+                        sockets.retain(|socket| {
+                            tokio::task::block_in_place(|| socket.blocking_lock().id != disconnected.id)
+                        });
+                        break 'exit sockets.len() == 0;
+                    }
+                    true
                 };
 
                 if should_exit {
@@ -466,16 +468,9 @@ impl WriteMatchManager {
                     .cloned()
                     .collect();
                 for timed_event in events {
-                    match timed_event.event {
-                        EventType::Public(_) => emitter::to_public_event_emitter(&timed_event)(
-                            socket_clone.lock().await.to(PUBLIC_EVENT_ROOM),
-                        )
-                        .unwrap(),
-                        EventType::Private(_) => emitter::to_private_event_emitter(&timed_event)(
-                            socket_clone.lock().await.clone(),
-                        )
-                        .unwrap(),
-                    }
+                    emitter::to_private_event_emitter(&timed_event)(
+                        socket_clone.lock().await.clone(),
+                    ).unwrap();
                 }
             });
     }

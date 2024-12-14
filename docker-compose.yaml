@@ -4,6 +4,8 @@ services:
   schnapsen-duo-server:
     build:
       context: ./schnapsen-duo-server
+      args:
+        - AMQP_URL=${AMQP_URL}
     container_name: schnapsen-duo-server
     command: schnapsen-duo-server
     ports:
@@ -15,7 +17,6 @@ services:
       - HOST_ADDR=0.0.0.0:6060
       - PUBLIC_ADDR=${SCHNAPSEN_DUO_PUBLIC_ADDR}
       - PRIVATE_ADDR=${SCHNAPSEN_DUO_PRIVATE_ADDR}
-      - AMQP_URL=${AMQP_URL}
       - REGION=${REGION}
   
   schnapsen-ai-client:
