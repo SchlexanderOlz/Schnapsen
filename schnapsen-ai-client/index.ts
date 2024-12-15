@@ -66,7 +66,18 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
         let card = await schnapsenPredict(state);
         console.log("AI predicted: ", card);
-        client.playCard(card);
+
+        if (card == "[ilegal values]") {
+          console.log("Had illegal values")
+          client.playCard()
+          client.playCard(
+            client.cardsPlayable[
+              Math.floor(Math.random() * client.cardsPlayable.length)
+            ]
+          );
+        } else {
+          client.playCard(card);
+        }
     });
 
     client.on("trump_change", async (trump) => {
