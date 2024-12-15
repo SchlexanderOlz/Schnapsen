@@ -42,10 +42,6 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       console.log("Timeout: ", timeout);
     })
 
-    client.on("finished_distribution", async () => {
-      // TODO: set trump suite
-    });
-
     client.on("self:allow_announce", async () => {
       return;
       const announcement = client.announceable![0];
@@ -69,6 +65,27 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
         console.log("AI predicted: ", card);
         client.playCard(card);
     });
+
+    client.on("trump_change", async (trump) => {
+      if (trump.card !== null) {
+        state.trump_suit = intoStateCard(trump.card);
+      } else {
+        state.trump_suit = "No_Card"
+      }
+    })
+
+    client.on("play_card", async (event) => {
+      // @ts-ignore
+      if (event.data.user_id === client.userId) {
+        state.played_card_by_opponent = "No_Card";
+        return;
+      }
+      state.played_card_by_opponent = intoStateCard(event.data.card);
+    })
+
+    client.on("trick", async (data) => {
+      state.played_card_by_opponent = "No_Card";
+    })
 
     client.on("self:allow_draw_card", async () => {
       client.drawCard();

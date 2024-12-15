@@ -21,8 +21,8 @@ export interface State {
   Bells_K: number;
   Bells_T: number;
   Bells_A: number;
-  trump_suit: number;
-  played_card_by_opponent: number;
+  trump_suit: string;
+  played_card_by_opponent: string;
   follow_suit: boolean;
   my_points: number;
   opponent_points: number;
@@ -51,8 +51,8 @@ export const initDefaultState = (): State => {
     Bells_K: 0,
     Bells_T: 0,
     Bells_A: 0,
-    trump_suit: 0,
-    played_card_by_opponent: 0,
+    trump_suit: "No_Card",
+    played_card_by_opponent: "No_Card",
     follow_suit: false,
     my_points: 0,
     opponent_points: 0,
@@ -130,6 +130,8 @@ export const schnapsenPredict = async (state: State): Promise<types.Card> => {
       "x-token": AI_MODEL_TOKEN
     },
   });
+
+  console.log(await res.text())
 
   return fromStateCard((await res.text()).replaceAll('"', ""));
 };
