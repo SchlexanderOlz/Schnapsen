@@ -1,4 +1,5 @@
 import { GameServerWriteClient, type Match } from "gn-matchmaker-client";
+import { sleep } from "bun";
 import * as amqplib from "amqplib";
 import type { Task } from "./types";
 import SchnapsenClient from "gn-schnapsen-client";
@@ -53,7 +54,9 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     });
 
     client.on("self:trump_change_possible", async (card) => {
-      while (!client.allowSwapTrump) {}
+      while (!client.allowSwapTrump) {
+        await sleep(500)
+      }
 
       client.swapTrump(card.data);
     });
@@ -61,6 +64,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("self:allow_play_card", async () => {
       console.log("Playing Card")
+        await sleep(500)
         let force_color_guess = client.cardsPlayable.every((card) => card.suit == client.cardsPlayable[0].suit);
         state.follow_suit = force_color_guess;
 
