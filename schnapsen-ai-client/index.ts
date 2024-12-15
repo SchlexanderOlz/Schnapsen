@@ -69,8 +69,6 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     client.on("trump_change", async (trump) => {
       if (trump.card !== null) {
         state.trump_suit = intoStateCard(trump.card);
-      } else {
-        state.trump_suit = "No_Card"
       }
     })
 
