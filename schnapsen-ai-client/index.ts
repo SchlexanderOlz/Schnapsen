@@ -54,6 +54,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     });
 
     client.on("self:trump_change_possible", async (card) => {
+      return;
       while (!client.allowSwapTrump) {
         await sleep(500)
       }
