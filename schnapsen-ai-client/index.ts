@@ -32,7 +32,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     let state: State = initDefaultState();
     state.ki_level = task.ai_level;
 
-    task.address = `http://${task.address}`
+    task.address = `https://${task.address}`
     let client = new SchnapsenClient(task.write, task as Match);
 
     console.log("Client initialized for match", task.read);
