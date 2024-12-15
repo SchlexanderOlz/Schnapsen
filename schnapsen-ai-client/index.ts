@@ -69,7 +69,6 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
         if (card.suit == "[ilegal values]") {
           console.log("Had illegal values")
-          client.playCard()
           client.playCard(
             client.cardsPlayable[
               Math.floor(Math.random() * client.cardsPlayable.length)
