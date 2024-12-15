@@ -53,8 +53,11 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     });
 
     client.on("self:trump_change_possible", async (card) => {
+      while (!client.allowSwapTrump) {}
+
       client.swapTrump(card.data);
     });
+
 
     client.on("self:allow_play_card", async () => {
       console.log("Playing Card")
