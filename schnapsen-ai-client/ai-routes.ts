@@ -131,7 +131,5 @@ export const schnapsenPredict = async (state: State): Promise<types.Card> => {
     },
   });
 
-  console.log(await res.text())
-
   return fromStateCard((await res.text()).replaceAll('"', ""));
 };
