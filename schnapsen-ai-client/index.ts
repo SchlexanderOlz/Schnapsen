@@ -66,8 +66,10 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     client.on("self:allow_play_card", async () => {
       console.log("Playing Card")
         await sleep(500)
-        let force_color_guess = client.cardsPlayable.every((card) => card.suit == client.cardsPlayable[0].suit);
-        state.follow_suit = force_color_guess;
+
+        if (client.stack.length == 0) {
+          state.follow_suit = true
+        }
 
         let card = await schnapsenPredict(state);
         console.log("AI predicted: ", card);
@@ -101,6 +103,10 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("trick", async (data) => {
       state.played_card_by_opponent = "No_Card";
+    })
+
+    client.on("close_talon", async () => {
+      state.follow_suit = true;
     })
 
     client.on("self:allow_draw_card", async () => {
