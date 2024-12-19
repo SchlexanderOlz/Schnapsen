@@ -880,7 +880,7 @@ impl SchnapsenDuo {
             if self
                 .players
                 .iter()
-                .all(|player| player.read().unwrap().cards.is_empty())
+                .any(|player| player.read().unwrap().cards.is_empty())
             {
                 winner.points += loser.points;
                 loser.points = 0;
