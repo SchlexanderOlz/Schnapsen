@@ -175,10 +175,7 @@ impl WriteMatchManager {
                     losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
                     event_log: self.get_event_log(),
                     ranking: Ranking {
-                        performances: HashMap::from_iter(vec![
-                            (winner.clone(), vec!["win".to_string()]),
-                            (loser.clone(), vec!["lose".to_string()]),
-                        ]),
+                        performances: HashMap::from_iter(vec![]),
                     },
                 };
 

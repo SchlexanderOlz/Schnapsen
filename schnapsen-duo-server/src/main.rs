@@ -93,18 +93,9 @@ async fn register_server() -> Result<String, Box<dyn std::error::Error>> {
         max_players: 2,
         min_players: 2,
         ranking_conf: gn_communicator::models::RankingConf {
-            max_stars: 5000,
+            max_stars: 50,
             description: "Schnapsen Duo".to_string(),
-            performances: vec![
-                gn_communicator::models::Performance {
-                    name: "win".to_string(),
-                    weight: 1,
-                },
-                gn_communicator::models::Performance {
-                    name: "lose".to_string(),
-                    weight: -1,
-                },
-            ],
+            performances: vec![],
         },
     };
 
