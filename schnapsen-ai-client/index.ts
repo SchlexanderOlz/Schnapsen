@@ -120,7 +120,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("self:card_unavailable", async (card) => {
       // @ts-ignore
-      state[intoStateCard(card.data) as keyof State] = 0;
+      state[intoStateCard(card.data) as keyof State] = 2;
     });
 
     client.on("trick", async (trick) => {
