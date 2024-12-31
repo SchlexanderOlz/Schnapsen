@@ -110,6 +110,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     })
 
     client.on("self:allow_draw_card", async () => {
+      await sleep(500)
       client.drawCard();
     });
 
