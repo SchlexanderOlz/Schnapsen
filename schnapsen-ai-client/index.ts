@@ -65,7 +65,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("self:allow_play_card", async () => {
       console.log("Playing Card")
-        await sleep(1000)
+        await sleep(500)
 
         if (client.stack.length == 0) {
           state.follow_suit = true
@@ -110,7 +110,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     })
 
     client.on("self:allow_draw_card", async () => {
-      await sleep(1000)
+      await sleep(500)
       client.drawCard();
     });
 
