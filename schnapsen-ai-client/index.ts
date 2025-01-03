@@ -10,13 +10,44 @@ import {
   type State,
 } from "./ai-routes";
 
-const AI_QUEUE = "ai-task-generate-request";
+const AI_TASK_QUEUE = "ai-task-generate-request";
+const AI_REGISTER_QUEUE = "ai-register";
 
 amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
   let channel = await conn.createChannel();
-  channel.assertQueue(AI_QUEUE, { durable: false });
+  channel.assertQueue(AI_TASK_QUEUE, { durable: false });
+  channel.assertQueue(AI_REGISTER_QUEUE, { durable: false });
 
-  channel.consume(AI_QUEUE, async (msg) => {
+  let bugo_hoss = {
+    game: "Schnapsen",
+    mode: "duo",
+    elo: 250,
+    display_name: "Bugo Hoss",
+  };
+
+  let lalph_raulen = {
+    game: "Schnapsen",
+    mode: "duo",
+    elo: 500,
+    display_name: "Lalph Raulen",
+  };
+
+  let kolfgang_woscher = {
+    game: "Schnapsen",
+    mode: "duo",
+    elo: 1500,
+    display_name: "Kolfgang Woscher",
+  };
+
+  let bugo_hoss_id = bugo_hoss.display_name;
+  let lalph_raulen_id = lalph_raulen.display_name;
+  let kolfgang_woscher_id = kolfgang_woscher.display_name;
+
+  channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(bugo_hoss)));
+  channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(lalph_raulen)));
+  channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(kolfgang_woscher)));
+
+  channel.consume(AI_TASK_QUEUE, async (msg) => {
     if (msg === null) {
       return;
     }
@@ -31,9 +62,22 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     channel.ack(msg);
 
     let state: State = initDefaultState();
-    state.ki_level = task.ai_level;
 
-    task.address = `https://${task.address}`
+    switch (task.ai_id) {
+      case bugo_hoss_id:
+        state.ki_level = 1;
+        break;
+      case lalph_raulen_id:
+        state.ki_level = 2;
+        break;
+      case kolfgang_woscher_id:
+        state.ki_level = 3;
+        break;
+    }
+
+    task.address = `http://${task.address}`
+
+    console.log(task.address)
     let client = new SchnapsenClient(task.write, task as Match);
 
     console.log("Client initialized for match", task.read);
