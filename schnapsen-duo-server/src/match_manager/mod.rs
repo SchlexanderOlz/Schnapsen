@@ -85,7 +85,6 @@ impl WriteMatchManager {
                 .collect(),
             ai_players: new_match.ai_players,
             read: read.to_string(),
-            ai: new_match.ai,
             url_pub: public_url,
             url_priv: private_url,
         };
