@@ -286,46 +286,51 @@ impl SchnapsenDuo {
         self.active.as_ref().unwrap().read().unwrap().id == player.id
     }
 
-    pub fn draw_card_after_trick(
+    fn draw_card_after_trick(
         &mut self,
         player: Arc<RwLock<Player>>,
     ) -> Result<Card, PlayerError> {
-        let player = &player.read().unwrap();
-        if !self.is_active(player) {
-            return Err(PlayerError::PlayerNotActive);
-        }
+        let card = {
+            let player = &player.read().unwrap();
+            if !self.is_active(player) {
+                return Err(PlayerError::PlayerNotActive);
+            }
 
-        if !self.stack.is_empty() {}
+            if !self.stack.is_empty() {}
 
-        if player.cards.len() == 5 {
-            return Err(PlayerError::CantTakeCardHaveAlreadyFive);
-        }
+            if player.cards.len() == 5 {
+                return Err(PlayerError::CantTakeCardHaveAlreadyFive);
+            }
 
-        if self.trump.is_none() {
-            return Err(PlayerError::CantTakeCardDeckEmpty);
-        }
+            if self.trump.is_none() {
+                return Err(PlayerError::CantTakeCardDeckEmpty);
+            }
 
-        if self.closed_talon.is_some() {
-            return Err(PlayerError::TalonAlreadyClosed);
-        }
+            if self.closed_talon.is_some() {
+                return Err(PlayerError::TalonAlreadyClosed);
+            }
 
-        let card = match self.draw_card(player) {
-            Ok(card) => card,
-            Err(PlayerError::CantTakeCardDeckEmpty) => self.take_trump(player),
-            Err(e) => return Err(e),
+            match self.draw_card(player) {
+                Ok(card) => card,
+                Err(PlayerError::CantTakeCardDeckEmpty) => self.take_trump(player),
+                Err(e) => return Err(e),
+            }
         };
 
         self.swap_to(self.get_non_active_player().unwrap());
 
-        let new = self.active.as_deref().unwrap().read().unwrap();
-        if new.cards.len() < 5 && self.trump.is_some() {
-            self.notify_priv(new.id.clone(), PrivateEvent::AllowDrawCard);
+        let new = self.get_active_player().unwrap();
+        let new_id = new.try_read().unwrap().id.clone();
+        let card_len = new.try_read().unwrap().cards.len();
+
+        if card_len < 5 && self.trump.is_some() {
+            self.draw_card_after_trick(new.clone())?;
         } else {
-            if new.announcable.len() > 0 {
-                self.notify_priv(new.id.clone(), PrivateEvent::AllowAnnounce);
+            if new.read().unwrap().announcable.len() > 0 {
+                self.notify_priv(new_id.clone(), PrivateEvent::AllowAnnounce);
             }
-            self.notify_priv(new.id.clone(), PrivateEvent::AllowCloseTalon);
-            self.notify_priv(new.id.clone(), PrivateEvent::AllowPlayCard);
+            self.notify_priv(new_id.clone(), PrivateEvent::AllowCloseTalon);
+            self.notify_priv(new_id.clone(), PrivateEvent::AllowPlayCard);
         }
         Ok(card)
     }
@@ -495,7 +500,16 @@ impl SchnapsenDuo {
             return Err(PlayerError::CantPlayCard(card));
         }
 
+
+        player.write().unwrap().cards.retain(|x| *x != card);
+        player
+            .write()
+            .unwrap()
+            .playable_cards
+            .retain(|x| *x != card);
+
         self.stack.push(card.clone());
+
         let player_id = player.read().unwrap().id.clone();
         self.notify_priv(
             player_id.clone(),
@@ -511,6 +525,7 @@ impl SchnapsenDuo {
             user_id: player_id,
             card,
         });
+
 
         if self.stack.len() == 2 {
             return self.handle_trick();
@@ -1031,7 +1046,7 @@ impl SchnapsenDuo {
         self.swap_to(won.clone());
 
         if !self.deck.is_empty() && self.closed_talon.is_none() {
-            self.notify_priv(won_id.clone(), PrivateEvent::AllowDrawCard);
+            self.draw_card_after_trick(won.clone())?;
         } else {
             if won.read().unwrap().announcable.len() > 0 {
                 self.notify_priv(won_id.clone(), PrivateEvent::AllowAnnounce);

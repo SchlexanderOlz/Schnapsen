@@ -47,6 +47,34 @@ where
     pub timestamp: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct TimeoutThreat {
+    pub timeout: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TimeoutThreatClose;
+
+impl TimeoutThreatClose {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl EventIdentifier for TimeoutThreatClose {
+    fn event_name(&self) -> &'static str {
+        "cancel_timeout_threat"
+    }
+}
+
+
+
+impl EventIdentifier for TimeoutThreat {
+    fn event_name(&self) -> &'static str {
+        "threaten_timeout"
+    }
+}
+
 impl<T> EventIdentifier for TimedEvent<T>
 where
     T: EventIdentifier + Clone + Serialize,

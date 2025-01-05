@@ -6,7 +6,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    emitter::EventIdentifier, events::{self, TimedEvent},
+    emitter::EventIdentifier,
+    events::{self, TimedEvent},
 };
 
 #[derive(Serialize)]
@@ -73,7 +74,7 @@ pub struct MatchResult {
     pub winners: HashMap<String, u8>,
     pub losers: HashMap<String, u8>,
     pub ranking: Ranking,
-    pub event_log: Vec<TimedEvent<events::SchnapsenDuoEventType>>
+    pub event_log: Vec<TimedEvent<events::SchnapsenDuoEventType>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,14 +89,19 @@ pub struct MatchAbruptClose {
     pub reason: MatchError,
 }
 
+
 impl Into<gn_communicator::models::MatchAbrubtClose> for MatchAbruptClose {
     fn into(self) -> gn_communicator::models::MatchAbrubtClose {
         gn_communicator::models::MatchAbrubtClose {
             match_id: self.match_id,
             reason: match self.reason {
-                MatchError::AllPlayersDisconnected => gn_communicator::models::MatchError::AllPlayersDisconnected,
-                MatchError::PlayerDidNotJoin(player_id) => gn_communicator::models::MatchError::PlayerDidNotJoin(player_id),
-            }
+                MatchError::AllPlayersDisconnected => {
+                    gn_communicator::models::MatchError::AllPlayersDisconnected
+                }
+                MatchError::PlayerDidNotJoin(player_id) => {
+                    gn_communicator::models::MatchError::PlayerDidNotJoin(player_id)
+                }
+            },
         }
     }
 }
@@ -107,7 +113,11 @@ impl Into<gn_communicator::models::MatchResult> for MatchResult {
             winners: self.winners,
             losers: self.losers,
             ranking: self.ranking.into(),
-            event_log: self.event_log.into_iter().map(|event| serde_json::to_value(&event).unwrap()).collect(),
+            event_log: self
+                .event_log
+                .into_iter()
+                .map(|event| serde_json::to_value(&event).unwrap())
+                .collect(),
         }
     }
 }

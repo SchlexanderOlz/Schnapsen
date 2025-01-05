@@ -67,10 +67,6 @@ impl<'a> Performer<'a> {
             Box::new(Self::announce_40) as PerformerFunction<'a>,
         );
         functions.insert(
-            SchnapsenDuoEmptyActions::DrawCard,
-            Box::new(Self::draw_card) as PerformerFunction<'a>,
-        );
-        functions.insert(
             SchnapsenDuoEmptyActions::CuttDeck,
             Box::new(Self::cutt_deck) as PerformerFunction<'a>,
         );
@@ -171,13 +167,6 @@ impl<'a> Performer<'a> {
         action: SchnapsenDuoActions,
     ) -> Result<(), PerformerError> {
         Ok(client.announce_40()?)
-    }
-
-    fn draw_card(
-        client: &SchnapsenDuoClient,
-        action: SchnapsenDuoActions,
-    ) -> Result<(), PerformerError> {
-        Ok(client.draw_card()?)
     }
 
     fn cutt_deck(

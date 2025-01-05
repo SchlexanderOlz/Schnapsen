@@ -72,13 +72,6 @@ impl SchnapsenDuoClient {
             .unwrap()
             .play_card(self.player.clone(), card.clone())?;
 
-        self.player.write().unwrap().cards.retain(|x| *x != card);
-        self.player
-            .write()
-            .unwrap()
-            .playable_cards
-            .retain(|x| *x != card);
-
         self.update_player_state();
         Ok(())
     }

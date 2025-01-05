@@ -25,8 +25,10 @@ use tracing::error;
 
 use crate::{
     emitter,
-    events::{event_logger, EventType, SchnapsenDuoEventType, TimedEvent},
-    models::{CreateMatch, MatchAbruptClose, MatchCreated, MatchError, MatchResult, Ranking, Timeout},
+    events::{event_logger, EventType, SchnapsenDuoEventType, TimedEvent, TimeoutThreat, TimeoutThreatClose},
+    models::{
+        CreateMatch, MatchAbruptClose, MatchCreated, MatchError, MatchResult, Ranking, Timeout,
+    },
     performer, translator,
 };
 const PUBLIC_EVENT_ROOM: &str = "public-events";
@@ -41,12 +43,17 @@ pub struct WriteMatchManager {
     logger: Arc<std::sync::Mutex<event_logger::EventLogger<SchnapsenDuoEventType>>>,
     exited: AtomicI8,
     started: AtomicBool,
-    on_exit_callbacks: std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
+    on_exit_callbacks:
+        std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
     min_players: usize,
 }
 
 impl WriteMatchManager {
-    pub fn create(io: Arc<SocketIo>, new_match: gn_communicator::models::CreateMatch, min_players: usize) -> Arc<Self> {
+    pub fn create(
+        io: Arc<SocketIo>,
+        new_match: gn_communicator::models::CreateMatch,
+        min_players: usize,
+    ) -> Arc<Self> {
         debug!("Creating new match: {:?}", new_match);
         let write = new_match.players.clone();
 
@@ -122,14 +129,23 @@ impl WriteMatchManager {
 
     #[inline]
     pub fn get_event_log(&self) -> Vec<TimedEvent<SchnapsenDuoEventType>> {
-        self.logger.lock().unwrap().all().into_iter().cloned().collect()
+        self.logger
+            .lock()
+            .unwrap()
+            .all()
+            .into_iter()
+            .cloned()
+            .collect()
     }
 
     pub fn on_exit<F>(self: Arc<Self>, callback: F)
     where
         F: FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync + 'static,
     {
-        self.on_exit_callbacks.lock().unwrap().push(Box::new(callback));
+        self.on_exit_callbacks
+            .lock()
+            .unwrap()
+            .push(Box::new(callback));
     }
 
     fn exit(self: Arc<Self>, reason: Result<MatchResult, MatchError>) {
@@ -137,62 +153,109 @@ impl WriteMatchManager {
             return;
         }
 
-        let reason = reason.map_err(|err| {
-            MatchAbruptClose {
-                match_id: self.meta.read.clone(),
-                reason: err,
-            }
+        let reason = reason.map_err(|err| MatchAbruptClose {
+            match_id: self.meta.read.clone(),
+            reason: err,
         });
 
-        self.exited.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.exited
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         for callback in self.on_exit_callbacks.lock().unwrap().drain(..) {
             callback(reason.clone());
         }
     }
 
+    #[inline]
+    fn get_sockets(&self, player_id: &str) -> Vec<Arc<tokio::sync::Mutex<SocketRef>>> {
+        self.write_connected
+            .read()
+            .unwrap()
+            .get(player_id)
+            .unwrap()
+            .clone()
+    }
+
     fn await_initial_connection(self: Arc<Self>) {
         for player in self.meta.player_write.keys() {
             let (tx, rx) = watch::channel(false);
-            self.awaiting_reconnection.lock().unwrap().insert(player.clone(), tx);
+            self.awaiting_reconnection
+                .lock()
+                .unwrap()
+                .insert(player.clone(), tx);
             tokio::spawn(self.clone().await_timeout(rx, player.clone()));
         }
     }
 
     fn setup_match_result_handler(self: Arc<Self>) {
-        self.clone().instance.lock().unwrap().on_pub_event(move |event| {
-            // TODO|POTERROR: Change this to final result
-            if let PublicEvent::Result {
-                winner,
-                points,
-                ranked,
-            } = event
-            {
-                let (loser, loser_points) = ranked.iter().find(|(k, _)| **k != winner).unwrap();
+        self.clone()
+            .instance
+            .lock()
+            .unwrap()
+            .on_pub_event(move |event| {
+                // TODO|POTERROR: Change this to final result
+                if let PublicEvent::Result {
+                    winner,
+                    points,
+                    ranked,
+                } = event
+                {
+                    let (loser, loser_points) = ranked.iter().find(|(k, _)| **k != winner).unwrap();
 
-                let result = MatchResult {
-                    match_id: self.meta.read.clone(),
-                    winners: HashMap::from_iter(vec![(winner.clone(), points)]),
-                    losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
-                    event_log: self.get_event_log(),
-                    ranking: Ranking {
-                        performances: HashMap::from_iter(vec![]),
-                    },
-                };
+                    let result = MatchResult {
+                        match_id: self.meta.read.clone(),
+                        winners: HashMap::from_iter(vec![(winner.clone(), points)]),
+                        losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
+                        event_log: self.get_event_log(),
+                        ranking: Ranking {
+                            performances: HashMap::from_iter(vec![]),
+                        },
+                    };
 
-                self.clone().exit(Ok(result));
-            }
-        });
+                    self.clone().exit(Ok(result));
+                }
+            });
+    }
 
+    fn threaten_timeout(&self, player_id: &str) {
+        let timeout: TimedEvent<TimeoutThreat> = TimedEvent {
+            event: TimeoutThreat {
+                timeout: FORCE_MOVE_TIMEOUT,
+            },
+            timestamp: chrono::Utc::now().timestamp_micros() as u64,
+        };
+
+        for socket in self.get_sockets(&player_id) {
+            let timeout = timeout.clone();
+            tokio::spawn(async move {
+                emitter::to_private_event_emitter(&timeout)(socket.lock().await.clone())
+            });
+        }
+    }
+
+    fn cancel_timeout_threat(&self, player_id: &str) {
+        let threat_close = TimedEvent {
+            event: TimeoutThreatClose::new(),
+            timestamp: chrono::Utc::now().timestamp_micros() as u64,
+        };
+
+        for socket in self.get_sockets(&player_id) {
+            let threat_close = threat_close.clone();
+            tokio::spawn(async move {
+                emitter::to_private_event_emitter(&threat_close)(socket.lock().await.clone())
+            });
+        }
     }
 
     async fn play_card_or_timeout(self: Arc<Self>, event: PrivateEvent, player_id: String) {
         if let PrivateEvent::AllowPlayCard = event {
             let (tx, rx) = watch::channel(false);
             let player_id_copy = player_id.clone();
+            let match_manager = self.clone();
             let on_play_card = move |event| {
                 if let PublicEvent::PlayCard { user_id, card: _ } = event {
                     if player_id_copy == user_id {
                         let _ = tx.send(true);
+                        match_manager.cancel_timeout_threat(&player_id_copy);
                     }
                 }
             };
@@ -202,6 +265,7 @@ impl WriteMatchManager {
                 .unwrap()
                 .on_pub_event(on_play_card.clone());
 
+            self.threaten_timeout(&player_id);
             self.clone().await_timeout(rx, player_id).await;
             self.instance.lock().unwrap().off_pub_event(on_play_card);
         }
@@ -209,7 +273,7 @@ impl WriteMatchManager {
 
     async fn await_timeout(self: Arc<Self>, mut rx: Receiver<bool>, player_id: String) {
         select! {
-            _ = rx.changed() => {}
+            _ = rx.changed() => {},
             _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
                 self.clone().timeout_player(player_id.clone());
 
@@ -254,9 +318,7 @@ impl WriteMatchManager {
                 let timeout = timeout.clone();
                 tokio::task::spawn(async move {
                     let lock = socket.lock().await;
-                    lock
-                        .emit("timeout", timeout.clone())
-                        .unwrap();
+                    lock.emit("timeout", timeout.clone()).unwrap();
                 });
             }
         }
@@ -299,13 +361,12 @@ impl WriteMatchManager {
         write: &str,
         socket: Arc<tokio::sync::Mutex<SocketRef>>,
     ) {
-        let player_id = self.meta.player_write.iter().find_map(|(k, v)| {
-            if v == write {
-                Some(k)
-            } else {
-                None
-            }
-        }).cloned();
+        let player_id = self
+            .meta
+            .player_write
+            .iter()
+            .find_map(|(k, v)| if v == write { Some(k) } else { None })
+            .cloned();
 
         if player_id.is_none() {
             return;
@@ -396,7 +457,9 @@ impl WriteMatchManager {
                     let mut lock = self.write_connected.write().unwrap();
                     if let Some(sockets) = lock.get_mut(&player_id) {
                         sockets.retain(|socket| {
-                            tokio::task::block_in_place(|| socket.blocking_lock().id != disconnected.id)
+                            tokio::task::block_in_place(|| {
+                                socket.blocking_lock().id != disconnected.id
+                            })
                         });
                         break 'exit sockets.len() == 0;
                     }
@@ -418,7 +481,7 @@ impl WriteMatchManager {
             .unwrap()
             .insert(player_id.clone(), tx);
 
-            self.await_timeout(rx, player_id).await;
+        self.await_timeout(rx, player_id).await;
     }
 
     async fn handle_auth(
@@ -467,7 +530,8 @@ impl WriteMatchManager {
                 for timed_event in events {
                     emitter::to_private_event_emitter(&timed_event)(
                         socket_clone.lock().await.clone(),
-                    ).unwrap();
+                    )
+                    .unwrap();
                 }
             });
     }
