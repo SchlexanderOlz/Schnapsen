@@ -286,10 +286,7 @@ impl SchnapsenDuo {
         self.active.as_ref().unwrap().read().unwrap().id == player.id
     }
 
-    fn draw_card_after_trick(
-        &mut self,
-        player: Arc<RwLock<Player>>,
-    ) -> Result<Card, PlayerError> {
+    fn draw_card_after_trick(&mut self, player: Arc<RwLock<Player>>) -> Result<Card, PlayerError> {
         let card = {
             let player = &player.read().unwrap();
             if !self.is_active(player) {
@@ -316,6 +313,8 @@ impl SchnapsenDuo {
                 Err(e) => return Err(e),
             }
         };
+
+        player.write().unwrap().cards.push(card.clone());
 
         self.swap_to(self.get_non_active_player().unwrap());
 
@@ -500,7 +499,6 @@ impl SchnapsenDuo {
             return Err(PlayerError::CantPlayCard(card));
         }
 
-
         player.write().unwrap().cards.retain(|x| *x != card);
         player
             .write()
@@ -525,7 +523,6 @@ impl SchnapsenDuo {
             user_id: player_id,
             card,
         });
-
 
         if self.stack.len() == 2 {
             return self.handle_trick();
@@ -787,10 +784,7 @@ impl SchnapsenDuo {
 
         let player_read = player.read().unwrap();
         if player_read.possible_trump_swap.is_some() {
-            self.notify_priv(
-                player_read.id.clone(),
-                PrivateEvent::AllowSwapTrump,
-            );
+            self.notify_priv(player_read.id.clone(), PrivateEvent::AllowSwapTrump);
         }
         callbacks
     }
