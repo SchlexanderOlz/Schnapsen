@@ -381,7 +381,7 @@ impl WriteMatchManager {
             .push(socket.clone());
 
         if let Some(rx) = self.awaiting_reconnection.lock().unwrap().remove(player_id) {
-            rx.send(true).unwrap();
+            let _ = rx.send(true);
         }
 
         let player = self.instance.lock().unwrap().get_player(player_id).unwrap();

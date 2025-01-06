@@ -18,6 +18,7 @@ services:
       - PUBLIC_ADDR=${SCHNAPSEN_DUO_PUBLIC_ADDR}
       - PRIVATE_ADDR=${SCHNAPSEN_DUO_PRIVATE_ADDR}
       - REGION=${REGION}
+      - DEBUG=${DEBUG}
   
   schnapsen-ai-client:
     build:
@@ -31,6 +32,7 @@ services:
       - AMQP_URL=${AMQP_URL}
       - SCHNAPSEN_AI_MODEL_URL=${SCHNAPSEN_AI_MODEL_URL}
       - SCHNAPSEN_AI_TOKEN=${SCHNAPSEN_AI_TOKEN}
+      - DEBUG=${DEBUG}
 
 networks:
   game-night-network:

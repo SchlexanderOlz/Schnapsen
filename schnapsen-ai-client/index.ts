@@ -82,11 +82,6 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     console.log("Client initialized for match", task.read);
 
-
-    client.on("timeout", async (timeout: any) => {
-      console.log("Timeout: ", timeout);
-    })
-
     client.on("self:allow_announce", async () => {
       return;
       const announcement = client.announceable![0];
@@ -111,12 +106,11 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       console.log("Playing Card")
         await sleep(500)
 
-        if (client.stack.length == 0) {
+        if (client.deckCardCount == 0) {
           state.follow_suit = true
         }
 
         let card = await schnapsenPredict(state);
-        console.log("AI predicted: ", card);
 
         if (card.suit == "[ilegal values]" || !client.cardsPlayable.some(e => e == card)) {
           console.log("Had illegal values")
