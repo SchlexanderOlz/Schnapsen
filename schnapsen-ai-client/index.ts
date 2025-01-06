@@ -132,7 +132,9 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     })
 
     client.on("play_card", async (event) => {
-      // @ts-ignore
+      /// @ts-ignore
+      state[intoStateCard(card.data) as keyof State] = 2;
+
       if (event.data.user_id === client.userId) {
         state.played_card_by_opponent = "No_Card";
         return;
