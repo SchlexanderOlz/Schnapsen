@@ -87,14 +87,14 @@ async fn register_server() -> Result<String, Box<dyn std::error::Error>> {
     let server_info = gn_communicator::models::GameServerCreate {
         region,
         game: "Schnapsen".to_string(),
-        mode: "duo".to_string(),
+        mode: "speed".to_string(),
         server_pub: public_url,
         server_priv: private_url,
         max_players: 2,
         min_players: 2,
         ranking_conf: gn_communicator::models::RankingConf {
             max_stars: 50,
-            description: "Schnapsen Duo".to_string(),
+            description: "Schnapsen Duo Speed".to_string(),
             performances: vec![],
         },
     };
