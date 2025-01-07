@@ -816,10 +816,6 @@ impl SchnapsenDuo {
     }
 
     fn swap_to(&mut self, player: Arc<RwLock<Player>>) {
-        self.update_announcable_props(player.clone());
-        self.update_swap_trump(player.clone());
-        self.update_playable_cards(player.clone());
-
         if self.active.is_none() || Arc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return;
         }
@@ -831,7 +827,8 @@ impl SchnapsenDuo {
 
         self.make_active(player.clone());
         self.update_announcable_props(player.clone());
-        self.update_swap_trump(player);
+        self.update_swap_trump(player.clone());
+        self.update_playable_cards(player.clone());
     }
 
     fn make_active(&mut self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
