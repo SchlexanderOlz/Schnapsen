@@ -54,7 +54,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     let task: Task = JSON.parse(msg.content.toString());
 
-    if (task.game !== "Schnapsen" || task.mode !== "duo") {
+    if (task.game !== "Schnapsen" || task.mode !== "speed") {
       channel.nack(msg);
       return;
     }
