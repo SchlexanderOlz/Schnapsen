@@ -253,6 +253,14 @@ impl SchnapsenDuo {
     }
 
     #[inline]
+    pub fn get_other_player(&self, other: Arc<RwLock<Player>>) -> Option<Arc<RwLock<Player>>> {
+        self.players
+            .iter()
+            .find(|player| !Arc::ptr_eq(*player, &other))
+            .cloned()
+    }
+
+    #[inline]
     fn get_active_player(&self) -> Option<Arc<RwLock<Player>>> {
         self.active.clone()
     }
@@ -289,10 +297,6 @@ impl SchnapsenDuo {
     fn draw_card_after_trick(&mut self, player: Arc<RwLock<Player>>) -> Result<Card, PlayerError> {
         let card = {
             let player = &player.read().unwrap();
-            if !self.is_active(player) {
-                return Err(PlayerError::PlayerNotActive);
-            }
-
             if !self.stack.is_empty() {}
 
             if player.cards.len() == 5 {
@@ -316,15 +320,14 @@ impl SchnapsenDuo {
 
         player.write().unwrap().cards.push(card.clone());
 
-        self.swap_to(self.get_non_active_player().unwrap());
-
-        let new = self.get_active_player().unwrap();
+        let new = self.get_other_player(player).unwrap();
         let new_id = new.try_read().unwrap().id.clone();
         let card_len = new.try_read().unwrap().cards.len();
 
         if card_len < 5 && self.trump.is_some() {
             self.draw_card_after_trick(new.clone())?;
         } else {
+            self.swap_to(new.clone());
             if new.read().unwrap().announcable.len() > 0 {
                 self.notify_priv(new_id.clone(), PrivateEvent::AllowAnnounce);
             }
@@ -1036,11 +1039,10 @@ impl SchnapsenDuo {
 
         self.update_finish_round(won.clone())?;
 
-        self.swap_to(won.clone());
-
         if !self.deck.is_empty() && self.closed_talon.is_none() {
             self.draw_card_after_trick(won.clone())?;
         } else {
+            self.swap_to(won.clone());
             if won.read().unwrap().announcable.len() > 0 {
                 self.notify_priv(won_id.clone(), PrivateEvent::AllowAnnounce);
             }
