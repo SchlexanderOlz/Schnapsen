@@ -122,14 +122,17 @@ const AI_MODEL_URL = process.env.SCHNAPSEN_AI_MODEL_URL!;
 const AI_MODEL_TOKEN = process.env.SCHNAPSEN_AI_TOKEN!;
 
 export const schnapsenPredict = async (state: State): Promise<types.Card> => {
-  const res = await fetch(AI_MODEL_URL, {
+  const card = await fetch(AI_MODEL_URL, {
     method: "POST",
     body: JSON.stringify(state),
     headers: {
       "Content-Type": "application/json",
       "x-token": AI_MODEL_TOKEN
     },
+  }).then(res => res.text()).catch((err) => {
+    console.error(err);
+    return "[ilegal values]";
   });
 
-  return fromStateCard((await res.text()).replaceAll('"', ""));
+  return fromStateCard((card).replaceAll('"', ""));
 };

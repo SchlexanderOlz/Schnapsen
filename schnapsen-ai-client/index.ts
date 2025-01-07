@@ -43,13 +43,14 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
   let lalph_raulen_id = lalph_raulen.display_name;
   let kolfgang_woscher_id = kolfgang_woscher.display_name;
 
-  let stop = false;
-
   channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(bugo_hoss)));
   channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(lalph_raulen)));
   channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(kolfgang_woscher)));
 
   channel.consume(AI_TASK_QUEUE, async (msg) => {
+    let stop = false;
+    let played_card = false
+
     if (msg === null) {
       return;
     }
@@ -86,43 +87,59 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("self:allow_announce", async () => {
       stop = true
+
+      if (played_card || client.announceable![0] === undefined) {
+        stop = false
+        return;
+      }
+
       const announcement = client.announceable![0];
+      console.log(announcement)
       if (announcement.data.announce_type == "Forty") {
         client.announce40();
       } else {
         client.announce20(announcement.data.cards);
       }
 
+      await sleep(1000)
       client.playCard(announcement.data.cards[0]);
+      await sleep(1000)
+      stop = false
     });
 
     client.on("self:trump_change_possible", async (card) => {
-      while (!client.allowSwapTrump) {
-        await sleep(500)
+      let onSwap = () => {
+        client.swapTrump(card.data);
+        client.off("self:allow_swap_trump", onSwap)
       }
 
-      client.swapTrump(card.data);
+      client.on("self:allow_swap_trump", onSwap)
     });
+
+    client.on("error", async (error) => {
+      console.error(error);
+    })
 
 
     client.on("self:allow_play_card", async () => {
+      played_card = false
       console.log("Playing Card")
-        await sleep(500)
+        await sleep(800)
 
         if (stop) {
-          stop = false
           return;
         }
+
+        played_card = true
 
         if (client.deckCardCount == 0) {
           state.follow_suit = true
         }
 
-        console.info(state)
         let card = await schnapsenPredict(state);
 
         if (card.suit == "[ilegal values]" || !client.cardsPlayable.some(e => e == card)) {
-          console.log("Had illegal values")
+          console.log("Had illegal values with state: ", state)
           client.playCard(
             client.cardsPlayable[
               Math.floor(Math.random() * client.cardsPlayable.length)
@@ -141,7 +158,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("play_card", async (event) => {
       // @ts-ignore
-      state[intoStateCard(event.data.card) as keyof State] = 2;
+      // state[intoStateCard(event.data.card) as keyof State] = 2;
 
       if (event.data.user_id === client.userId) {
         state.played_card_by_opponent = "No_Card";
@@ -158,11 +175,6 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       state.follow_suit = true;
     })
 
-    client.on("self:allow_draw_card", async () => {
-      await sleep(500)
-      client.drawCard();
-    });
-
     client.on("self:card_available", async (card) => {
       // @ts-ignore
       state[intoStateCard(card.data) as keyof State] = 1;
@@ -170,7 +182,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("self:card_unavailable", async (card) => {
       // @ts-ignore
-      state[intoStateCard(card.data) as keyof State] = 2;
+      // state[intoStateCard(card.data) as keyof State] = 2;
     });
 
     client.on("trick", async (trick) => {
