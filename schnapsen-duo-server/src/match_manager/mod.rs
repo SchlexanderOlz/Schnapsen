@@ -46,6 +46,7 @@ pub struct WriteMatchManager {
     on_exit_callbacks:
         std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
     min_players: usize,
+    bummerl: bool,
 }
 
 impl WriteMatchManager {
@@ -77,7 +78,7 @@ impl WriteMatchManager {
         let meta = MatchCreated {
             region,
             game: new_match.game,
-            mode: new_match.mode,
+            mode: new_match.mode.clone(),
             player_write: new_match
                 .players
                 .into_iter()
@@ -100,6 +101,7 @@ impl WriteMatchManager {
             awaiting_reconnection: std::sync::Mutex::new(HashMap::new()),
             on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
             min_players,
+            bummerl: new_match.mode == "bummerl"
         });
 
         {
@@ -110,6 +112,10 @@ impl WriteMatchManager {
         }
 
         new.clone().setup_match_result_handler();
+        if new.bummerl {
+            new.clone().setup_match_final_result_handler();
+        }
+
         new.clone().await_initial_connection();
 
         // TODO: The created match should be added to some active-state
@@ -203,6 +209,40 @@ impl WriteMatchManager {
                     let result = MatchResult {
                         match_id: self.meta.read.clone(),
                         winners: HashMap::from_iter(vec![(winner.clone(), points)]),
+                        losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
+                        event_log: self.get_event_log(),
+                        ranking: Ranking {
+                            performances: HashMap::from_iter(vec![]),
+                        },
+                    };
+
+                    if !self.bummerl {
+                        self.clone().exit(Ok(result));
+                    }
+                    let mut instance_lock = self.instance.lock().unwrap();
+                    let player = instance_lock.get_player(&winner).unwrap();
+                    instance_lock.next_round(player);
+                }
+            });
+    }
+
+    fn setup_match_final_result_handler(self: Arc<Self>) {
+        self.clone()
+            .instance
+            .lock()
+            .unwrap()
+            .on_pub_event(move |event| {
+                if let PublicEvent::FinalResult {
+                    winner,
+                    ranked,
+                } = event
+                {
+                    let (loser, loser_points) = ranked.iter().find(|(k, _)| **k != winner).unwrap();
+                    let winner_points = ranked.get(&winner).unwrap();
+
+                    let result = MatchResult {
+                        match_id: self.meta.read.clone(),
+                        winners: HashMap::from_iter(vec![(winner.clone(), winner_points.clone())]),
                         losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
                         event_log: self.get_event_log(),
                         ranking: Ranking {

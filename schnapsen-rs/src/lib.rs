@@ -1063,7 +1063,7 @@ impl SchnapsenDuo {
         callbacks
     }
 
-    fn next_round(&mut self, winner: Arc<RwLock<Player>>) {
+    pub fn next_round(&mut self, winner: Arc<RwLock<Player>>) {
         self.active = None;
         self.trump = None;
         self.stack.clear();
