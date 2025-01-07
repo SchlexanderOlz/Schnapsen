@@ -20,21 +20,21 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
   let bugo_hoss = {
     game: "Schnapsen",
-    mode: "duo",
+    mode: "speed",
     elo: 250,
     display_name: "Bugo Hoss",
   };
 
   let lalph_raulen = {
     game: "Schnapsen",
-    mode: "duo",
+    mode: "speed",
     elo: 500,
     display_name: "Lalph Raulen",
   };
 
   let kolfgang_woscher = {
     game: "Schnapsen",
-    mode: "duo",
+    mode: "speed",
     elo: 1500,
     display_name: "Kolfgang Woscher",
   };
