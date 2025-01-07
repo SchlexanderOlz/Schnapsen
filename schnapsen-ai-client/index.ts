@@ -43,6 +43,8 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
   let lalph_raulen_id = lalph_raulen.display_name;
   let kolfgang_woscher_id = kolfgang_woscher.display_name;
 
+  let stop = false;
+
   channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(bugo_hoss)));
   channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(lalph_raulen)));
   channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(kolfgang_woscher)));
@@ -83,17 +85,18 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     console.log("Client initialized for match", task.read);
 
     client.on("self:allow_announce", async () => {
-      return;
+      stop = true
       const announcement = client.announceable![0];
       if (announcement.data.announce_type == "Forty") {
         client.announce40();
       } else {
         client.announce20(announcement.data.cards);
       }
+
+      client.playCard(announcement.data.cards[0]);
     });
 
     client.on("self:trump_change_possible", async (card) => {
-      return;
       while (!client.allowSwapTrump) {
         await sleep(500)
       }
@@ -105,6 +108,11 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     client.on("self:allow_play_card", async () => {
       console.log("Playing Card")
         await sleep(500)
+
+        if (stop) {
+          stop = false
+          return;
+        }
 
         if (client.deckCardCount == 0) {
           state.follow_suit = true
