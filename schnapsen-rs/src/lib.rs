@@ -1082,7 +1082,6 @@ impl SchnapsenDuo {
     fn can_swap_trump<'a>(&self, player: &'a Player) -> Option<&'a Card> {
         if self.active.is_none()
             || self.trump.is_none()
-            || !self.is_active(player)
             || !self.stack.is_empty()
             || self.closed_talon.is_some()
         {
