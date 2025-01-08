@@ -1073,10 +1073,10 @@ impl SchnapsenDuo {
             player.try_write().unwrap().reset();
         });
 
-        self.recreate_deck();
-        self.distribute_cards().unwrap();
 
         self.make_active(winner.clone());
+        self.recreate_deck();
+        self.distribute_cards().unwrap();
     }
 
     fn can_swap_trump<'a>(&self, player: &'a Player) -> Option<&'a Card> {
