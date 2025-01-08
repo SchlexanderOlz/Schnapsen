@@ -109,6 +109,8 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("self:trump_change_possible", async (card) => {
       let onSwap = () => {
+        // @ts-ignore
+        state[intoStateCard(event.data.card) as keyof State] = 0;
         client.swapTrump(card.data);
         client.off("self:allow_swap_trump", onSwap)
       }
