@@ -86,6 +86,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     console.log("Client initialized for match", task.read);
 
     client.on("self:allow_announce", async () => {
+      return;
       stop = true
 
       if (played_card || client.announceable![0] === undefined) {
@@ -108,6 +109,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     });
 
     client.on("self:trump_change_possible", async (card) => {
+      return
       let onSwap = () => {
         client.swapTrump(card.data);
         client.off("self:allow_swap_trump", onSwap)
