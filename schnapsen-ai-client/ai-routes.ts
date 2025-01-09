@@ -130,7 +130,7 @@ export const schnapsenPredict = async (state: State): Promise<types.Card> => {
       "x-token": AI_MODEL_TOKEN
     },
   }).then(res => res.text()).catch((err) => {
-    console.error(err);
+    console.log(err);
     return "[ilegal values]";
   });
 
