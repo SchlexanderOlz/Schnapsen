@@ -423,7 +423,9 @@ impl WriteMatchManager {
 
         if let Some(rx) = self.awaiting_reconnection.lock().unwrap().remove(player_id) {
             let _ = rx.send(true);
+        }
 
+        if self.started.load(std::sync::atomic::Ordering::SeqCst) {
             tokio::spawn(
                 self.clone()
                     .emit_event_log(socket.clone(), 0, Some(player_id.clone())),
