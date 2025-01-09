@@ -109,8 +109,10 @@ async fn health_check(id: String) {
 async fn run_health_check(id: String) -> ! {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
     loop {
+        debug!("Waiting for send health-check");
         interval.tick().await;
         health_check(id.clone()).await;
+        debug!("Sent health-check");
     }
 }
 
