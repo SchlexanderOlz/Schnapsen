@@ -913,7 +913,7 @@ impl SchnapsenDuo {
         let points;
         if loser.points == 0 {
             points = 3;
-        } else if loser.points >= 33 {
+        } else if loser.points <= 33 {
             points = 2;
         } else {
             points = 1;
