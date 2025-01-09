@@ -432,7 +432,14 @@ impl WriteMatchManager {
             );
         }
 
-        let player = self.instance.lock().unwrap().get_player(player_id).unwrap();
+        let player = match self.instance.lock().unwrap().get_player(player_id) {
+            Some(player) => player,
+            None => {
+                error!("Player not found: {:?}", player_id);
+
+                return;
+            }
+        };
 
         debug!("Got player: {:?}", player.read().unwrap().id);
 
