@@ -711,7 +711,7 @@ impl SchnapsenDuo {
         player: Arc<RwLock<Player>>,
     ) -> Vec<tokio::task::JoinHandle<()>> {
         let (callbacks, announcable) = self.notify_announcable_props(&player.read().unwrap());
-        player.try_write().unwrap().announcable = announcable;
+        player.write().unwrap().announcable = announcable;
         callbacks
     }
 
