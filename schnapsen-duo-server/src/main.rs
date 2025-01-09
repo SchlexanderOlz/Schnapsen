@@ -4,8 +4,8 @@ use futures::future::join_all;
 use gn_communicator::{rabbitmq::RabbitMQCommunicator, Communicator};
 use lazy_static::lazy_static;
 use socketioxide::SocketIo;
-use tokio::join;
 use std::sync::Arc;
+use tokio::join;
 use tower::ServiceBuilder;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -85,30 +85,36 @@ async fn register_server(modes: &[String]) -> Result<Vec<String>, Box<dyn std::e
     let private_url =
         std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
     let region = std::env::var("REGION").expect("REGION must be set");
-     
+
     Ok(join_all(modes.into_iter().map(|mode| {
-    let server_info = gn_communicator::models::GameServerCreate {
-        region: region.clone(),
-        game: "Schnapsen".to_string(),
-        mode: mode.clone(),
-        server_pub: public_url.clone(),
-        server_priv: private_url.clone(),
-        max_players: 2,
-        min_players: 2,
-        ranking_conf: gn_communicator::models::RankingConf {
-            max_stars: 50,
-            description: "Schnapsen Duo".to_string(),
-            performances: vec![],
-        },
-    };
+        let server_info = gn_communicator::models::GameServerCreate {
+            region: region.clone(),
+            game: "Schnapsen".to_string(),
+            mode: mode.clone(),
+            server_pub: public_url.clone(),
+            server_priv: private_url.clone(),
+            max_players: 2,
+            min_players: 2,
+            ranking_conf: gn_communicator::models::RankingConf {
+                max_stars: 50,
+                description: "Schnapsen Duo".to_string(),
+                performances: vec![],
+            },
+        };
 
-    tokio::spawn(async move {
-        communicator.get().await.create_game(&server_info).await.unwrap()
-    })
-
-    })).await.into_iter().map(|x| x.unwrap()).collect())
-
-
+        tokio::spawn(async move {
+            communicator
+                .get()
+                .await
+                .create_game(&server_info)
+                .await
+                .unwrap()
+        })
+    }))
+    .await
+    .into_iter()
+    .map(|x| x.unwrap())
+    .collect())
 }
 
 async fn health_check(id: String) {
@@ -136,7 +142,9 @@ async fn main() {
     let (layer, io) = socketioxide::SocketIo::new_layer();
     let io = Arc::new(io);
 
-    let server_ids = register_server(&["speed".to_string(), "bummerl".to_string()]).await.unwrap();
+    let server_ids = register_server(&["speed".to_string(), "bummerl".to_string()])
+        .await
+        .unwrap();
     info!("Registered servers as {:?}", server_ids);
 
     tokio::spawn(listen_for_match_create(io));
