@@ -222,6 +222,7 @@ impl WriteMatchManager {
 
                     if !self.bummerl {
                         self.clone().exit(Ok(result));
+                        return;
                     }
                     let mut instance_lock = self.instance.lock().unwrap();
                     let player = instance_lock.get_player(&winner).unwrap();
