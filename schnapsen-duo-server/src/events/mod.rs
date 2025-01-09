@@ -1,4 +1,5 @@
 use event_logger::{EventLike};
+use schnapsen_rs::PrivateEvent;
 use serde::Serialize;
 
 use crate::emitter::EventIdentifier;

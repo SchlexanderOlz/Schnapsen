@@ -376,7 +376,7 @@ impl WriteMatchManager {
                 logger
                     .lock()
                     .unwrap()
-                    .log(SchnapsenDuoEventType::Public(event).into());
+                    .log(SchnapsenDuoEventType::Public(event).into(), None);
             });
         }
 
@@ -385,11 +385,11 @@ impl WriteMatchManager {
             let player = instance_lock.get_player(&player).unwrap();
 
             let logger = logger.clone();
-            instance_lock.on_priv_event(player, move |event| {
+            instance_lock.on_priv_event(player.clone(), move |event| {
                 logger
                     .lock()
                     .unwrap()
-                    .log(SchnapsenDuoEventType::Private(event).into());
+                    .log(SchnapsenDuoEventType::Private(event).into(), Some(player.read().unwrap().id.clone()));
             });
         }
 
