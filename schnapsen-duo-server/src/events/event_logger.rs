@@ -12,7 +12,6 @@ use super::TimedEvent;
 
 pub trait EventLike: EventIdentifier + Clone + Serialize + Clone {}
 
-
 pub struct EventLogger<T>
 where
     T: EventLike,
@@ -47,20 +46,24 @@ where
     }
 
     pub fn events_since(&self, timestamp: u64, user_id: Option<String>) -> Vec<&TimedEvent<T>> {
+        let user_events: Vec<_> = self
+            .events
+            .iter()
+            .filter(|timed_event| timed_event.0.is_none() || timed_event.0 == user_id)
+            .collect();
+
         let find_first = || {
-            self.events
+            user_events
                 .iter()
-                .filter(|timed_event| timed_event.0.is_none() || timed_event.0 == user_id)
                 .position(|event| event.1.timestamp >= timestamp)
                 .unwrap_or(0)
         };
 
-        let idx = self
-            .events
+        let idx = user_events
             .binary_search_by_key(&timestamp, |event| event.1.timestamp)
             .unwrap_or(find_first());
 
-        self.events[idx..].iter().map(|x| &x.1).collect()
+        user_events[idx..].iter().map(|x| &x.1).collect()
     }
 
     pub fn all(&self) -> Vec<&TimedEvent<T>> {
