@@ -1,3 +1,4 @@
+use core::time;
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
@@ -25,7 +26,10 @@ use tracing::error;
 
 use crate::{
     emitter,
-    events::{event_logger, EventType, SchnapsenDuoEventType, TimedEvent, TimeoutThreat, TimeoutThreatClose},
+    events::{
+        event_logger, EventType, SchnapsenDuoEventType, TimedEvent, TimeoutThreat,
+        TimeoutThreatClose,
+    },
     models::{
         CreateMatch, MatchAbruptClose, MatchCreated, MatchError, MatchResult, Ranking, Timeout,
     },
@@ -101,7 +105,7 @@ impl WriteMatchManager {
             awaiting_reconnection: std::sync::Mutex::new(HashMap::new()),
             on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
             min_players,
-            bummerl: new_match.mode == "bummerl"
+            bummerl: new_match.mode == "bummerl",
         });
 
         {
@@ -232,11 +236,7 @@ impl WriteMatchManager {
             .lock()
             .unwrap()
             .on_pub_event(move |event| {
-                if let PublicEvent::FinalResult {
-                    winner,
-                    ranked,
-                } = event
-                {
+                if let PublicEvent::FinalResult { winner, ranked } = event {
                     let (loser, loser_points) = ranked.iter().find(|(k, _)| **k != winner).unwrap();
                     let winner_points = ranked.get(&winner).unwrap();
 
@@ -312,7 +312,7 @@ impl WriteMatchManager {
 
     async fn await_timeout(self: Arc<Self>, mut rx: Receiver<bool>, player_id: String) {
         select! {
-            _ = rx.changed() => {},
+            _ = rx.changed() => { },
             _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
                 self.clone().timeout_player(player_id.clone());
 
@@ -328,7 +328,7 @@ impl WriteMatchManager {
         };
     }
 
-    fn wait_for_move(self: Arc<Self>, player_id: String) {
+    fn setup_wait_for_move(self: Arc<Self>, player_id: String) {
         let player = self
             .instance
             .lock()
@@ -422,6 +422,11 @@ impl WriteMatchManager {
 
         if let Some(rx) = self.awaiting_reconnection.lock().unwrap().remove(player_id) {
             let _ = rx.send(true);
+
+            tokio::spawn(
+                self.clone()
+                    .emit_event_log(socket.clone(), 0, Some(player_id.clone())),
+            );
         }
 
         let player = self.instance.lock().unwrap().get_player(player_id).unwrap();
@@ -445,7 +450,7 @@ impl WriteMatchManager {
                 });
             });
 
-        self.clone().wait_for_move(player_id.to_string());
+        self.clone().setup_wait_for_move(player_id.to_string());
 
         let player_id_clone = player_id.to_string();
         let instance = self.instance.clone();
@@ -479,11 +484,11 @@ impl WriteMatchManager {
             }
         });
 
-        self.handle_disconnect(disconnect_socket, player_id.to_string())
+        self.setup_disconnect_handle(disconnect_socket, player_id.to_string())
             .await;
     }
 
-    async fn handle_disconnect(
+    async fn setup_disconnect_handle(
         self: Arc<Self>,
         socket: Arc<tokio::sync::Mutex<SocketRef>>,
         player_id: String,
@@ -552,26 +557,47 @@ impl WriteMatchManager {
         };
     }
 
+    async fn emit_event_log(
+        self: Arc<Self>,
+        socket: Arc<tokio::sync::Mutex<SocketRef>>,
+        timestamp: u64,
+        user_id: Option<String>,
+    ) {
+        let events: Vec<_> = self
+            .logger
+            .lock()
+            .unwrap()
+            .events_since(timestamp, user_id)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        for timed_event in events {
+            emitter::to_private_event_emitter(&timed_event)(socket.lock().await.clone()).unwrap();
+        }
+    }
+
     async fn setup_sync_event(self: Arc<Self>, socket: Arc<tokio::sync::Mutex<SocketRef>>) {
         let socket_clone = socket.clone();
         socket
             .lock()
             .await
             .on("sync", move |Data(timestamp): Data<u64>| async move {
-                let events: Vec<_> = self
-                    .logger
-                    .lock()
+                let user_id = self
+                    .write_connected
+                    .read()
                     .unwrap()
-                    .events_since(timestamp)
-                    .into_iter()
-                    .cloned()
-                    .collect();
-                for timed_event in events {
-                    emitter::to_private_event_emitter(&timed_event)(
-                        socket_clone.lock().await.clone(),
-                    )
-                    .unwrap();
-                }
+                    .iter()
+                    .find_map(|(k, v)| {
+                        if v.iter().any(|other| Arc::ptr_eq(other, &socket_clone)) {
+                            Some(k.clone())
+                        } else {
+                            None
+                        }
+                    });
+
+                self.emit_event_log(socket_clone.clone(), timestamp, user_id)
+                    .await;
             });
     }
 
@@ -582,8 +608,8 @@ impl WriteMatchManager {
         {
             let matchmanager = self.clone();
             let socket_clone = socket_ptr.clone();
-            socket.on("auth", move |Data(data): Data<String>| {
-                matchmanager.handle_auth(data, socket_clone)
+            socket.on("auth", move |Data(data): Data<String>| async move {
+                matchmanager.handle_auth(data, socket_clone).await;
             });
         }
 

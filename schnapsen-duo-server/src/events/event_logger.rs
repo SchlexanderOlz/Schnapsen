@@ -46,10 +46,11 @@ where
             .map(|idx| &self.events[idx])
     }
 
-    pub fn events_since(&self, timestamp: u64) -> Vec<&TimedEvent<T>> {
+    pub fn events_since(&self, timestamp: u64, user_id: Option<String>) -> Vec<&TimedEvent<T>> {
         let find_first = || {
             self.events
                 .iter()
+                .filter(|timed_event| timed_event.event.user_id().is_none() || timed_event.event.user_id() == user_id)
                 .position(|event| event.timestamp >= timestamp)
                 .unwrap_or(0)
         };

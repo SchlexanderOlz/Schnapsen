@@ -5,6 +5,9 @@ use tracing::debug;
 
 pub trait EventIdentifier {
     fn event_name(&self) -> &'static str;
+    fn user_id(&self) -> Option<String> {
+        None
+    }
 }
 
 pub fn to_private_event_emitter<'a, T>(
