@@ -20,21 +20,18 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
   let bugo_hoss = {
     game: "Schnapsen",
-    mode: "speed",
     elo: 250,
     display_name: "Bugo Hoss",
   };
 
   let lalph_raulen = {
     game: "Schnapsen",
-    mode: "speed",
     elo: 500,
     display_name: "Lalph Raulen",
   };
 
   let kolfgang_woscher = {
     game: "Schnapsen",
-    mode: "speed",
     elo: 1500,
     display_name: "Kolfgang Woscher",
   };
@@ -43,9 +40,15 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
   let lalph_raulen_id = lalph_raulen.display_name;
   let kolfgang_woscher_id = kolfgang_woscher.display_name;
 
-  channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(bugo_hoss)));
-  channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(lalph_raulen)));
-  channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify(kolfgang_woscher)));
+  function registerAIFor(info: any, modes: string[]) {
+    modes.forEach((mode) => {
+      channel.publish("", AI_REGISTER_QUEUE, Buffer.from(JSON.stringify({ ...info, mode })));
+    });
+  }
+
+  registerAIFor(bugo_hoss, ["speed", "bummerl"])
+  registerAIFor(lalph_raulen, ["speed", "bummerl"])
+  registerAIFor(kolfgang_woscher, ["speed", "bummerl"])
 
   channel.consume(AI_TASK_QUEUE, async (msg) => {
     let stop = false;

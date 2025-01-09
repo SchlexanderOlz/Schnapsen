@@ -1,8 +1,10 @@
 use async_once::AsyncOnce;
 use axum::{self, routing};
+use futures::future::join_all;
 use gn_communicator::{rabbitmq::RabbitMQCommunicator, Communicator};
 use lazy_static::lazy_static;
 use socketioxide::SocketIo;
+use tokio::join;
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{
@@ -78,28 +80,35 @@ async fn listen_for_match_create(io: Arc<SocketIo>) {
         .await;
 }
 
-async fn register_server() -> Result<String, Box<dyn std::error::Error>> {
+async fn register_server(modes: &[String]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let public_url = std::env::var("PUBLIC_ADDR").expect("SCHNAPSEN_DUO_PUBLIC_ADDR must be set");
     let private_url =
         std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
     let region = std::env::var("REGION").expect("REGION must be set");
-
+     
+    Ok(join_all(modes.into_iter().map(|mode| {
     let server_info = gn_communicator::models::GameServerCreate {
-        region,
+        region: region.clone(),
         game: "Schnapsen".to_string(),
-        mode: "speed".to_string(),
-        server_pub: public_url,
-        server_priv: private_url,
+        mode: mode.clone(),
+        server_pub: public_url.clone(),
+        server_priv: private_url.clone(),
         max_players: 2,
         min_players: 2,
         ranking_conf: gn_communicator::models::RankingConf {
             max_stars: 50,
-            description: "Schnapsen Duo Speed".to_string(),
+            description: "Schnapsen Duo".to_string(),
             performances: vec![],
         },
     };
 
-    Ok(communicator.get().await.create_game(&server_info).await?)
+    tokio::spawn(async move {
+        communicator.get().await.create_game(&server_info).await.unwrap()
+    })
+
+    })).await.into_iter().map(|x| x.unwrap()).collect())
+
+
 }
 
 async fn health_check(id: String) {
@@ -127,11 +136,14 @@ async fn main() {
     let (layer, io) = socketioxide::SocketIo::new_layer();
     let io = Arc::new(io);
 
-    let uuid = register_server().await.unwrap();
-    info!("Registered server as {:?}", uuid);
+    let server_ids = register_server(&["speed".to_string(), "bummerl".to_string()]).await.unwrap();
+    info!("Registered servers as {:?}", server_ids);
 
     tokio::spawn(listen_for_match_create(io));
-    tokio::spawn(run_health_check(uuid));
+
+    for uuid in server_ids {
+        tokio::spawn(run_health_check(uuid));
+    }
 
     let host_url = std::env::var("HOST_ADDR").expect("HOST_ADDR must be set");
     let listener = tokio::net::TcpListener::bind(host_url.as_str())
