@@ -89,6 +89,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     console.log("Client initialized for match", task.read);
 
     client.on("self:allow_announce", async () => {
+      await sleep(1000)
       stop = true
 
       if (played_card || client.announceable![0] === undefined) {
@@ -111,7 +112,8 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     });
 
     client.on("self:trump_change_possible", async (card) => {
-      let onSwap = () => {
+      let onSwap = async () => {
+        await sleep(500)
         // @ts-ignore
         state[intoStateCard(card.data) as keyof State] = 0;
         client.swapTrump(card.data);
@@ -129,7 +131,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     client.on("self:allow_play_card", async () => {
       played_card = false
       console.log("Playing Card")
-        await sleep(800)
+        await sleep(1300)
 
         if (stop) {
           return;
