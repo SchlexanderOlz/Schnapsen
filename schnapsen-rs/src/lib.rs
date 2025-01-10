@@ -440,7 +440,7 @@ impl SchnapsenDuo {
         let mut callbacks = Vec::new();
         for player in player_order.clone() {
             for _ in 0..3 {
-                callbacks.extend(self.do_cards(&mut player.try_write().unwrap()));
+                callbacks.extend(self.do_cards(&mut player.write().unwrap()));
             }
         }
         let trump = self.deck.pop().unwrap();
@@ -449,7 +449,7 @@ impl SchnapsenDuo {
 
         for player in player_order.clone() {
             for _ in 0..2 {
-                callbacks.extend(self.do_cards(&mut player.try_write().unwrap()));
+                callbacks.extend(self.do_cards(&mut player.write().unwrap()));
             }
         }
 
