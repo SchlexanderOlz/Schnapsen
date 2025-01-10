@@ -521,6 +521,10 @@ impl WriteMatchManager {
                 };
 
                 if should_exit {
+                    if self.write_connected.read().unwrap().values().flatten().count() == 0 {
+                        self.exit(Err(MatchError::AllPlayersDisconnected));
+                        return;
+                    }
                     tokio::spawn(self.reconnect_or_timeout(player_id));
                 }
             },
