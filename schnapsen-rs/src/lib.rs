@@ -423,7 +423,7 @@ impl SchnapsenDuo {
     pub fn recreate_deck(&mut self) {
         self.deck = Self::populate_deck().into();
         self.players.iter().for_each(|player| {
-            player.as_ref().try_write().unwrap().reset();
+            player.as_ref().write().unwrap().reset();
         });
     }
 
@@ -919,7 +919,7 @@ impl SchnapsenDuo {
             points = 1;
         }
 
-        winner.player.try_write().unwrap().points += points;
+        winner.player.write().unwrap().points += points;
 
         let mut ranked = HashMap::new();
         {
@@ -935,8 +935,8 @@ impl SchnapsenDuo {
             ranked,
         });
 
-        winner.player.try_write().unwrap().reset();
-        loser.player.try_write().unwrap().reset();
+        winner.player.write().unwrap().reset();
+        loser.player.write().unwrap().reset();
 
         if self
             .players
@@ -1035,7 +1035,7 @@ impl SchnapsenDuo {
 
         let cards = [self.stack.pop().unwrap(), self.stack.pop().unwrap()];
 
-        won.try_write().unwrap().tricks.push(cards);
+        won.write().unwrap().tricks.push(cards);
 
         self.update_finish_round(won.clone())?;
 
@@ -1070,7 +1070,7 @@ impl SchnapsenDuo {
         self.closed_talon = None;
         self.taken_trump = None;
         self.players.iter().for_each(|player| {
-            player.try_write().unwrap().reset();
+            player.write().unwrap().reset();
         });
 
 
@@ -1135,7 +1135,7 @@ impl SchnapsenDuo {
         let callbacks =
             self.notify_changes_playable_cards(&player.read().unwrap(), &playable_cards);
 
-        player.try_write().unwrap().playable_cards = playable_cards.to_vec();
+        player.write().unwrap().playable_cards = playable_cards.to_vec();
 
         callbacks
     }
