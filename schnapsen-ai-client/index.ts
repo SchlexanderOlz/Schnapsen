@@ -89,8 +89,8 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     console.log("Client initialized for match", task.read);
 
     client.on("self:allow_announce", async () => {
-      await sleep(1000)
       stop = true
+      await sleep(1000)
 
       if (played_card || client.announceable![0] === undefined) {
         stop = false
