@@ -783,7 +783,7 @@ impl SchnapsenDuo {
     fn update_swap_trump(&self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
         let (callbacks, can_swap) = self.notify_swap_trump_check(&player.read().unwrap());
 
-        player.try_write().unwrap().possible_trump_swap = can_swap;
+        player.write().unwrap().possible_trump_swap = can_swap;
 
         let player_read = player.read().unwrap();
         if player_read.possible_trump_swap.is_some() {
