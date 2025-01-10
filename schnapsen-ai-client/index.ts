@@ -71,13 +71,13 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     switch (task.ai_id) {
       case bugo_hoss_id:
-        state.ki_level = 3;
+        state.ki_level = 4;
         break;
       case lalph_raulen_id:
-        state.ki_level = 3;
+        state.ki_level = 4;
         break;
       case kolfgang_woscher_id:
-        state.ki_level = 3;
+        state.ki_level = 4;
         break;
     }
 
