@@ -51,6 +51,7 @@ pub struct WriteMatchManager {
         std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
     min_players: usize,
     bummerl: bool,
+    total_round_points: u8 
 }
 
 impl WriteMatchManager {
@@ -58,6 +59,7 @@ impl WriteMatchManager {
         io: Arc<SocketIo>,
         new_match: gn_communicator::models::CreateMatch,
         min_players: usize,
+        total_round_points: u8
     ) -> Arc<Self> {
         debug!("Creating new match: {:?}", new_match);
         let write = new_match.players.clone();
@@ -106,6 +108,7 @@ impl WriteMatchManager {
             on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
             min_players,
             bummerl: new_match.mode == "bummerl",
+            total_round_points
         });
 
         {
@@ -208,7 +211,9 @@ impl WriteMatchManager {
                     ranked,
                 } = event
                 {
-                    let (loser, loser_points) = ranked.iter().find(|(k, _)| **k != winner).unwrap();
+                    let loser = ranked.keys().find(|k| **k != winner).unwrap();
+
+                    let loser_points = self.total_round_points - points;
 
                     let result = MatchResult {
                         match_id: self.meta.read.clone(),
@@ -317,13 +322,40 @@ impl WriteMatchManager {
             _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
                 self.clone().timeout_player(player_id.clone());
 
-                if !self.started.load(std::sync::atomic::Ordering::SeqCst) {
-                    self.exit(Err(MatchError::PlayerDidNotJoin(player_id)));
+                let mut losers = HashMap::new();
+                let winners = self
+                    .write_connected
+                    .read()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        let res = (k.clone(), 0 as u8);
+                        if !v.is_empty() {
+                            Some(res)
+                        } else {
+                            losers.insert(res.0, res.1);
+                            None
+                        }
+                    })
+                    .collect();
+
+                let result = MatchResult {
+                    match_id: self.match_id.clone(),
+                    winners,
+                    losers,
+                    ranking: Ranking {
+                        performances: HashMap::new(),
+                    },
+                    event_log: self.get_event_log(),
+                };
+
+                if self.write_connected.read().unwrap().len() < self.min_players {
+                    self.clone().exit(Ok(result));
                     return;
                 }
 
-                if self.write_connected.read().unwrap().len() < self.min_players {
-                    self.exit(Err(MatchError::AllPlayersDisconnected));
+                if !self.started.load(std::sync::atomic::Ordering::SeqCst) {
+                    self.exit(Ok(result));
                 }
             }
         };
@@ -386,10 +418,10 @@ impl WriteMatchManager {
 
             let logger = logger.clone();
             instance_lock.on_priv_event(player.clone(), move |event| {
-                logger
-                    .lock()
-                    .unwrap()
-                    .log(SchnapsenDuoEventType::Private(event).into(), Some(player.read().unwrap().id.clone()));
+                logger.lock().unwrap().log(
+                    SchnapsenDuoEventType::Private(event).into(),
+                    Some(player.read().unwrap().id.clone()),
+                );
             });
         }
 
@@ -521,7 +553,15 @@ impl WriteMatchManager {
                 };
 
                 if should_exit {
-                    if self.write_connected.read().unwrap().values().flatten().count() == 0 {
+                    if self
+                        .write_connected
+                        .read()
+                        .unwrap()
+                        .values()
+                        .flatten()
+                        .count()
+                        == 0
+                    {
                         self.exit(Err(MatchError::AllPlayersDisconnected));
                         return;
                     }
