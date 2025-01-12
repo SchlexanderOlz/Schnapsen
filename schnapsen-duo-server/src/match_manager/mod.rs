@@ -319,8 +319,6 @@ impl WriteMatchManager {
         select! {
             _ = rx.changed() => { },
             _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
-                self.clone().timeout_player(player_id.clone());
-
                 let mut losers = HashMap::new();
                 let winners = self
                     .write_connected
@@ -347,6 +345,8 @@ impl WriteMatchManager {
                     },
                     event_log: self.get_event_log(),
                 };
+
+                self.clone().timeout_player(player_id.clone());
 
                 if self.write_connected.read().unwrap().len() < self.min_players {
                     self.clone().exit(Ok(result));
