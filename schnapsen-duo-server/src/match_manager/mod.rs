@@ -59,7 +59,6 @@ impl WriteMatchManager {
         io: Arc<SocketIo>,
         new_match: gn_communicator::models::CreateMatch,
         min_players: usize,
-        total_round_points: u8
     ) -> Arc<Self> {
         debug!("Creating new match: {:?}", new_match);
         let write = new_match.players.clone();
@@ -108,7 +107,7 @@ impl WriteMatchManager {
             on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
             min_players,
             bummerl: new_match.mode == "bummerl",
-            total_round_points
+            total_round_points: if new_match.mode == "bummerl" { 7 } else { 3 }
         });
 
         {
