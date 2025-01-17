@@ -200,9 +200,8 @@ impl WriteMatchManager {
     fn to_bummerl_points(points: u8) -> u8 {
         match points {
             66.. => 3,
-            33..65 => 2,
-            ..32 => 1,
-            _ => 0
+            33..=65 => 2,
+            ..=32 => 1,
         }
     }
 
