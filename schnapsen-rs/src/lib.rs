@@ -896,12 +896,7 @@ impl SchnapsenDuo {
                 .iter()
                 .any(|player| player.read().unwrap().cards.is_empty())
             {
-                winner.points += loser.points;
-                loser.points = 0;
-
                 if let Some(ref player) = self.closed_talon {
-                    winner.points += 10;
-
                     if Arc::ptr_eq(&player, &winner.player) {
                         std::mem::swap(&mut winner.player, &mut loser.player);
                     }
@@ -937,9 +932,6 @@ impl SchnapsenDuo {
             points,
             ranked,
         });
-
-        winner.player.write().unwrap().reset();
-        loser.player.write().unwrap().reset();
 
         if self
             .players
