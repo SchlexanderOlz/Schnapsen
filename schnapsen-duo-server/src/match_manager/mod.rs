@@ -51,7 +51,7 @@ pub struct WriteMatchManager {
         std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
     min_players: usize,
     bummerl: bool,
-    total_round_points: u8 
+    total_round_points: u8,
 }
 
 impl WriteMatchManager {
@@ -107,7 +107,7 @@ impl WriteMatchManager {
             on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
             min_players,
             bummerl: new_match.mode == "bummerl",
-            total_round_points: if new_match.mode == "bummerl" { 7 } else { 3 }
+            total_round_points: if new_match.mode == "bummerl" { 7 } else { 3 },
         });
 
         {
@@ -197,6 +197,15 @@ impl WriteMatchManager {
         }
     }
 
+    fn to_bummerl_points(points: u8) -> u8 {
+        match points {
+            66.. => 3,
+            33..65 => 2,
+            ..32 => 1,
+            _ => 0
+        }
+    }
+
     fn setup_match_result_handler(self: Arc<Self>) {
         self.clone()
             .instance
@@ -206,31 +215,28 @@ impl WriteMatchManager {
                 // TODO|POTERROR: Change this to final result
                 if let PublicEvent::Result {
                     winner,
-                    points,
-                    ranked,
+                    ..
                 } = event
                 {
-                    let loser = ranked.keys().find(|k| **k != winner).unwrap();
+                    if self.bummerl {
+                        let mut instance_lock = self.instance.lock().unwrap();
+                        let player = instance_lock.get_player(&winner).unwrap();
+                        instance_lock.next_round(player);
+                        return;
+                    }
 
-                    let loser_points = self.total_round_points - points;
-
+                    let points = self.instance.lock().unwrap().calc_points().unwrap();
                     let result = MatchResult {
                         match_id: self.meta.read.clone(),
-                        winners: HashMap::from_iter(vec![(winner.clone(), points)]),
-                        losers: HashMap::from_iter(vec![(loser.clone(), loser_points.clone())]),
+                        winners: HashMap::from_iter(vec![(points.winner.player.read().unwrap().id.clone(), Self::to_bummerl_points(points.winner.points))]),
+                        losers: HashMap::from_iter(vec![(points.loser.player.read().unwrap().id.clone(), Self::to_bummerl_points(points.loser.points))]),
                         event_log: self.get_event_log(),
                         ranking: Ranking {
                             performances: HashMap::from_iter(vec![]),
                         },
                     };
 
-                    if !self.bummerl {
-                        self.clone().exit(Ok(result));
-                        return;
-                    }
-                    let mut instance_lock = self.instance.lock().unwrap();
-                    let player = instance_lock.get_player(&winner).unwrap();
-                    instance_lock.next_round(player);
+                    self.clone().exit(Ok(result));
                 }
             });
     }
@@ -393,7 +399,6 @@ impl WriteMatchManager {
                 });
             }
         }
-        self.write_connected.write().unwrap().remove(&player_id);
     }
 
     fn setup_event_log(

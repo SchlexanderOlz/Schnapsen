@@ -79,8 +79,8 @@ impl PlayerError {
 }
 
 pub struct PlayerPoint {
-    player: Arc<RwLock<Player>>,
-    points: u8,
+    pub player: Arc<RwLock<Player>>,
+    pub points: u8,
 }
 
 pub struct CardComparisonResult {
@@ -882,7 +882,7 @@ impl SchnapsenDuo {
     }
 
     fn update_finish_round(&mut self, last_trick: Arc<RwLock<Player>>) -> Result<(), PlayerError> {
-        let comparison_result = self.update_points().unwrap();
+        let comparison_result = self.notfiy_points().unwrap();
 
         let mut winner = comparison_result.winner;
         let mut loser = comparison_result.loser;
@@ -964,7 +964,7 @@ impl SchnapsenDuo {
         Ok(())
     }
 
-    fn update_points(&mut self) -> Result<CardComparisonResult, PlayerError> {
+    pub fn calc_points(&self) -> Result<CardComparisonResult, PlayerError> {
         let points = self
             .players
             .iter()
@@ -990,16 +990,6 @@ impl SchnapsenDuo {
         let (max_points, winner) = points.clone().max_by_key(|(points, _)| *points).unwrap();
         let (min_points, loser) = points.min_by_key(|(points, _)| *points).unwrap();
 
-        self.notify_pub(PublicEvent::Score {
-            user_id: winner.read().unwrap().id.clone(),
-            points: max_points,
-        });
-
-        self.notify_pub(PublicEvent::Score {
-            user_id: loser.read().unwrap().id.clone(),
-            points: min_points,
-        });
-
         Ok(CardComparisonResult {
             winner: PlayerPoint {
                 player: winner.clone(),
@@ -1010,6 +1000,21 @@ impl SchnapsenDuo {
                 points: min_points,
             },
         })
+    }
+
+    fn notfiy_points(&mut self) -> Result<CardComparisonResult, PlayerError> {
+        let comparison = self.calc_points()?;
+        self.notify_pub(PublicEvent::Score {
+            user_id: comparison.winner.player.read().unwrap().id.clone(),
+            points: comparison.winner.points,
+        });
+
+        self.notify_pub(PublicEvent::Score {
+            user_id: comparison.loser.player.read().unwrap().id.clone(),
+            points: comparison.loser.points,
+        });
+
+        Ok(comparison)
     }
 
     fn handle_trick(&mut self) -> Result<(), PlayerError> {
