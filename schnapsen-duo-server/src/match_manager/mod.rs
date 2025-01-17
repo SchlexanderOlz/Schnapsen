@@ -225,6 +225,9 @@ impl WriteMatchManager {
                     }
 
                     let points = self.instance.lock().unwrap().calc_points().unwrap();
+
+                    debug!("Reporting Match Result as: {:?}", points);
+
                     let result = MatchResult {
                         match_id: self.meta.read.clone(),
                         winners: HashMap::from_iter(vec![(points.winner.player.read().unwrap().id.clone(), Self::to_bummerl_points(points.winner.points))]),

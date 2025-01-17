@@ -42,7 +42,7 @@ pub enum CardSuit {
     Spades = 3,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Player {
     pub id: String,
     pub cards: Vec<Card>,

@@ -78,11 +78,14 @@ impl PlayerError {
     }
 }
 
+
+#[derive(Debug, Clone)]
 pub struct PlayerPoint {
     pub player: Arc<RwLock<Player>>,
     pub points: u8,
 }
 
+#[derive(Debug, Clone)]
 pub struct CardComparisonResult {
     pub winner: PlayerPoint,
     pub loser: PlayerPoint,
