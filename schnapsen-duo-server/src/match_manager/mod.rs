@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use futures::{lock::Mutex, task};
+use futures::{lock::Mutex, task, FutureExt};
 use schnapsen_rs::{PrivateEvent, PublicEvent, SchnapsenDuo};
 use serde::Serialize;
 use socketioxide::{
@@ -30,6 +30,7 @@ use crate::{
         event_logger, EventType, SchnapsenDuoEventType, TimedEvent, TimeoutThreat,
         TimeoutThreatClose,
     },
+    match_manager,
     models::{
         CreateMatch, MatchAbruptClose, MatchCreated, MatchError, MatchResult, Ranking, Timeout,
     },
@@ -51,7 +52,6 @@ pub struct WriteMatchManager {
         std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
     min_players: usize,
     bummerl: bool,
-    total_round_points: u8,
 }
 
 impl WriteMatchManager {
@@ -107,7 +107,6 @@ impl WriteMatchManager {
             on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
             min_players,
             bummerl: new_match.mode == "bummerl",
-            total_round_points: if new_match.mode == "bummerl" { 7 } else { 3 },
         });
 
         {
@@ -198,11 +197,64 @@ impl WriteMatchManager {
     }
 
     fn to_bummerl_points(points: u8) -> u8 {
-        match points {
+        debug!("Converting points: {:?}", points);
+        let res = match points {
             66.. => 3,
             33..=65 => 2,
             ..=32 => 1,
+        };
+        debug!("Converted points: {:?}", res);
+        res
+    }
+
+    fn on_match_result(self: Arc<Self>, winner: String) {
+        if self.bummerl {
+            let match_manager = self.clone();
+            tokio::spawn(async move {
+                for sockets in match_manager
+                    .write_connected
+                    .read()
+                    .unwrap()
+                    .values()
+                    .cloned()
+                {
+                    sockets.into_iter().for_each(move |socket| {
+                        tokio::spawn(async move {
+                            socket.lock().await.emit("reset", ()).unwrap();
+                        });
+                    });
+                }
+
+                tokio::time::sleep(Duration::from_secs(5)).await;
+
+                let mut instance_lock = match_manager.instance.lock().unwrap();
+                let player = instance_lock.get_player(&winner).unwrap();
+                instance_lock.next_round(player);
+            });
+            return;
         }
+
+        let points = self.instance.lock().unwrap().calc_points().unwrap();
+
+        debug!("Reporting Match Result as: {:?}", points);
+
+        let result = MatchResult {
+            match_id: self.meta.read.clone(),
+            winners: HashMap::from_iter(vec![(
+                points.winner.player.read().unwrap().id.clone(),
+                Self::to_bummerl_points(points.winner.points),
+            )]),
+            losers: HashMap::from_iter(vec![(
+                points.loser.player.read().unwrap().id.clone(),
+                Self::to_bummerl_points(points.loser.points),
+            )]),
+            event_log: self.get_event_log(),
+            ranking: Ranking {
+                performances: HashMap::from_iter(vec![]),
+            },
+        };
+
+        self.clone().exit(Ok(result));
     }
 
     fn setup_match_result_handler(self: Arc<Self>) {
@@ -212,33 +264,8 @@ impl WriteMatchManager {
             .unwrap()
             .on_pub_event(move |event| {
                 // TODO|POTERROR: Change this to final result
-                if let PublicEvent::Result {
-                    winner,
-                    ..
-                } = event
-                {
-                    if self.bummerl {
-                        let mut instance_lock = self.instance.lock().unwrap();
-                        let player = instance_lock.get_player(&winner).unwrap();
-                        instance_lock.next_round(player);
-                        return;
-                    }
-
-                    let points = self.instance.lock().unwrap().calc_points().unwrap();
-
-                    debug!("Reporting Match Result as: {:?}", points);
-
-                    let result = MatchResult {
-                        match_id: self.meta.read.clone(),
-                        winners: HashMap::from_iter(vec![(points.winner.player.read().unwrap().id.clone(), Self::to_bummerl_points(points.winner.points))]),
-                        losers: HashMap::from_iter(vec![(points.loser.player.read().unwrap().id.clone(), Self::to_bummerl_points(points.loser.points))]),
-                        event_log: self.get_event_log(),
-                        ranking: Ranking {
-                            performances: HashMap::from_iter(vec![]),
-                        },
-                    };
-
-                    self.clone().exit(Ok(result));
+                if let PublicEvent::Result { winner, .. } = event {
+                    self.clone().on_match_result(winner);
                 }
             });
     }
