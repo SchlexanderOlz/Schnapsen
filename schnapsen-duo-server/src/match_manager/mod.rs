@@ -112,15 +112,22 @@ impl WriteMatchManager {
         {
             let new = new.clone();
 
-            io.ns(format!("/{read}"), move |socket: SocketRef| {
-                new.setup_read_ns(socket)
-            });
+            let public_room_setup = Arc::new(AtomicBool::new(false));
 
-            instance.lock().unwrap().on_pub_event(move |event| {
-                emitter::to_public_event_emitter(&event.into() as &TimedEvent<PublicEvent>)(
-                    io.to(PUBLIC_EVENT_ROOM),
-                )
-                .unwrap();
+            io.ns(format!("/{read}"), {
+                move |socket: SocketRef| {
+                    if !public_room_setup.load(std::sync::atomic::Ordering::SeqCst) {
+                        let socket = socket.clone();
+                        instance.lock().unwrap().on_pub_event(move |event| {
+                            emitter::to_public_event_emitter(
+                                &event.into() as &TimedEvent<PublicEvent>
+                            )(socket.to(PUBLIC_EVENT_ROOM))
+                            .unwrap();
+                        });
+                        public_room_setup.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    new.setup_read_ns(socket)
+                }
             });
         }
 
