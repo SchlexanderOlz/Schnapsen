@@ -356,7 +356,7 @@ impl WriteMatchManager {
 
                 self.clone().timeout_player(player_id.clone());
 
-                if self.write_connected.read().unwrap().len() < self.min_players {
+                if !self.write_connected.read().unwrap().iter().all(|(_, v)| v.len() >= self.min_players) {
                     self.clone().exit(Ok(result));
                     return;
                 }
