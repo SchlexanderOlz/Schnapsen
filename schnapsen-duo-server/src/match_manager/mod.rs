@@ -111,8 +111,16 @@ impl WriteMatchManager {
 
         {
             let new = new.clone();
+
             io.ns(format!("/{read}"), move |socket: SocketRef| {
                 new.setup_read_ns(socket)
+            });
+
+            instance.lock().unwrap().on_pub_event(move |event| {
+                emitter::to_public_event_emitter(&event.into() as &TimedEvent<PublicEvent>)(
+                    io.to(PUBLIC_EVENT_ROOM),
+                )
+                .unwrap();
             });
         }
 
@@ -626,16 +634,6 @@ impl WriteMatchManager {
             .setup_private_access(&data.clone(), socket.clone())
             .await;
         debug!("Authenticated: {:?} at Game: {:?}", data, self.match_id);
-
-        self.instance.lock().unwrap().on_pub_event(move |event| {
-            let socket_clone = socket.clone();
-            tokio::task::spawn(async move {
-                emitter::to_public_event_emitter(&event.into() as &TimedEvent<PublicEvent>)(
-                    socket_clone.lock().await.to(PUBLIC_EVENT_ROOM),
-                )
-                .unwrap();
-            });
-        });
 
         if self.write_connected.read().unwrap().len() == self.meta.player_write.len()
             && !self.started.swap(true, std::sync::atomic::Ordering::SeqCst)
