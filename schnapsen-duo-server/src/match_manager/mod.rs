@@ -370,17 +370,17 @@ impl WriteMatchManager {
             _ = rx.changed() => { },
             _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
                 let mut losers = HashMap::new();
-                let winners = self
+                losers.insert(player_id.clone(), 0 as u8);
+
+                let winners: HashMap<_, _> = self
                     .write_connected
                     .read()
                     .unwrap()
                     .iter()
-                    .filter_map(|(k, v)| {
-                        let res = (k.clone(), 0 as u8);
-                        if !v.is_empty() {
-                            Some(res)
+                    .filter_map(|(other_id, _)| {
+                        if player_id != **other_id {
+                            Some((other_id.clone(), 0 as u8))
                         } else {
-                            losers.insert(res.0, res.1);
                             None
                         }
                     })
@@ -398,7 +398,7 @@ impl WriteMatchManager {
 
                 self.clone().timeout_player(player_id.clone());
 
-                if !self.write_connected.read().unwrap().iter().all(|(_, v)| v.len() >= self.min_players) {
+                if self.write_connected.read().unwrap().iter().any(|(_, v)| v.len() < self.min_players) {
                     self.clone().exit(Ok(result));
                     return;
                 }
