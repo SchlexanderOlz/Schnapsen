@@ -3,7 +3,7 @@ use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
     sync::{
-        atomic::{AtomicBool, AtomicI8},
+        atomic::{AtomicBool, AtomicI8, AtomicU64},
         Arc, RwLock,
     },
     time::Duration,
@@ -52,6 +52,7 @@ pub struct WriteMatchManager {
         std::sync::Mutex<Vec<Box<dyn FnOnce(Result<MatchResult, MatchAbruptClose>) + Send + Sync>>>,
     min_players: usize,
     bummerl: bool,
+    round_begin_timestamp: AtomicU64,
 }
 
 impl WriteMatchManager {
@@ -107,6 +108,7 @@ impl WriteMatchManager {
             on_exit_callbacks: std::sync::Mutex::new(Vec::new()),
             min_players,
             bummerl: new_match.mode == "bummerl",
+            round_begin_timestamp: AtomicU64::new(chrono::Utc::now().timestamp_micros() as u64),
         });
 
         {
@@ -241,6 +243,11 @@ impl WriteMatchManager {
                 }
 
                 tokio::time::sleep(Duration::from_secs(5)).await;
+
+                self.round_begin_timestamp.store(
+                    chrono::Utc::now().timestamp_micros() as u64,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
 
                 let mut instance_lock = match_manager.instance.lock().unwrap();
                 let player = instance_lock.get_player(&winner).unwrap();
@@ -507,8 +514,12 @@ impl WriteMatchManager {
 
         if self.started.load(std::sync::atomic::Ordering::SeqCst) {
             tokio::spawn(
-                self.clone()
-                    .emit_event_log(socket.clone(), 0, Some(player_id.clone())),
+                self.clone().emit_event_log(
+                    socket.clone(),
+                    self.round_begin_timestamp
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                    Some(player_id.clone()),
+                ),
             );
         }
 
@@ -671,10 +682,9 @@ impl WriteMatchManager {
 
     async fn setup_sync_event(self: Arc<Self>, socket: Arc<tokio::sync::Mutex<SocketRef>>) {
         let socket_clone = socket.clone();
-        socket
-            .lock()
-            .await
-            .on("sync", move |Data(timestamp): Data<u64>| async move {
+        socket.lock().await.on(
+            "sync",
+            move |Data(timestamp): Data<Option<u64>>| async move {
                 let user_id = self
                     .write_connected
                     .read()
@@ -688,9 +698,18 @@ impl WriteMatchManager {
                         }
                     });
 
-                self.emit_event_log(socket_clone.clone(), timestamp, user_id)
+                self.clone()
+                    .emit_event_log(
+                        socket_clone.clone(),
+                        timestamp.unwrap_or(
+                            self.round_begin_timestamp
+                                .load(std::sync::atomic::Ordering::SeqCst),
+                        ),
+                        user_id,
+                    )
                     .await;
-            });
+            },
+        );
     }
 
     async fn listen_for_access_events(self: Arc<Self>, socket: SocketRef) {
