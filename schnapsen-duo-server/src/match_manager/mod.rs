@@ -122,8 +122,12 @@ impl WriteMatchManager {
                         let socket = socket.clone();
                         instance.lock().unwrap().on_pub_event(move |event| {
                             emitter::to_public_event_emitter(
-                                &event.into() as &TimedEvent<PublicEvent>
+                                &event.clone().into() as &TimedEvent<PublicEvent>
                             )(socket.to(PUBLIC_EVENT_ROOM))
+                            .unwrap();
+                            emitter::to_private_event_emitter(
+                                &event.into() as &TimedEvent<PublicEvent>
+                            )(socket.clone())
                             .unwrap();
                         });
                         public_room_setup.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -713,8 +717,8 @@ impl WriteMatchManager {
     }
 
     async fn listen_for_access_events(self: Arc<Self>, socket: SocketRef) {
-        let socket_ptr = Arc::new(tokio::sync::Mutex::new(socket.clone()));
         socket.join(PUBLIC_EVENT_ROOM).unwrap();
+        let socket_ptr = Arc::new(tokio::sync::Mutex::new(socket.clone()));
 
         {
             let matchmanager = self.clone();

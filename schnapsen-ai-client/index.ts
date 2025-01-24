@@ -158,8 +158,10 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     });
 
     client.on("trump_change", async (trump) => {
+      console.log("Trump changed to", trump.card);
       if (trump.card !== null) {
         state.trump_suit = intoStateCard(trump.card);
+        console.log("Trump changed to", state.trump_suit);
       }
     })
 
