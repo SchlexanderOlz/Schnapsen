@@ -1073,7 +1073,9 @@ impl SchnapsenDuo {
         self.taken_trump = None;
 
         for player in &self.players {
-            let player_lock = player.read().unwrap();
+            let mut player_lock = player.write().unwrap();
+            player_lock.cards.clear();
+            player_lock.playable_cards.clear();
             for card in player_lock.cards.iter() {
                 self.notify_priv(player_lock.id.clone(), PrivateEvent::CardUnavailabe(card.clone()));
                 self.notify_priv(player_lock.id.clone(), PrivateEvent::CardNotPlayable(card.clone()));
