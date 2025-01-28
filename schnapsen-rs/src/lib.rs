@@ -826,14 +826,16 @@ impl SchnapsenDuo {
         self.update_announcable_props(player.clone());
         self.update_swap_trump(player.clone());
         self.update_playable_cards(player.clone());
-        if self.active.is_none() || Arc::ptr_eq(&player, self.active.as_ref().unwrap()) {
+        if self.active.is_some() && Arc::ptr_eq(&player, self.active.as_ref().unwrap()) {
             return;
         }
 
-        let user_id = self.active.as_deref().unwrap().read().unwrap().id.clone();
-        self.notify_pub(PublicEvent::Inactive {
-            user_id: user_id.clone(),
-        });
+        if let Some(active) = &self.active {
+            let user_id = active.read().unwrap().id.clone();
+            self.notify_pub(PublicEvent::Inactive {
+                user_id: user_id.clone(),
+            });
+        }
 
         self.make_active(player.clone());
     }
