@@ -1069,17 +1069,20 @@ impl SchnapsenDuo {
     }
 
     pub fn next_round(&mut self, winner: Arc<RwLock<Player>>) {
+        self.active = None;
         self.closed_talon = None;
         self.taken_trump = None;
 
         for player in &self.players {
             let mut player_lock = player.write().unwrap();
-            player_lock.cards.clear();
-            player_lock.playable_cards.clear();
+
             for card in player_lock.cards.iter() {
                 self.notify_priv(player_lock.id.clone(), PrivateEvent::CardUnavailabe(card.clone()));
                 self.notify_priv(player_lock.id.clone(), PrivateEvent::CardNotPlayable(card.clone()));
             }
+
+            player_lock.cards.clear();
+            player_lock.playable_cards.clear();
         }
 
         self.recreate_deck();
