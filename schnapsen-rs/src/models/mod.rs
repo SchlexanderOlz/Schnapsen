@@ -56,10 +56,8 @@ pub struct Player {
 
 impl Player {
     pub fn reset(&mut self) {
-        self.cards.clear();
         self.tricks.clear();
         self.announcements.clear();
-        self.announcable.clear();
     }
 
     pub fn new(id: String) -> Self {

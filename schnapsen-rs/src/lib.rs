@@ -1064,14 +1064,22 @@ impl SchnapsenDuo {
     }
 
     pub fn next_round(&mut self, winner: Arc<RwLock<Player>>) {
-        self.trump = None;
-        self.stack.clear();
         self.closed_talon = None;
         self.taken_trump = None;
 
+        for player in &self.players {
+            let player_lock = player.read().unwrap();
+            for card in player_lock.cards.iter() {
+                self.notify_priv(player_lock.id.clone(), PrivateEvent::CardUnavailabe(card.clone()));
+                self.notify_priv(player_lock.id.clone(), PrivateEvent::CardNotPlayable(card.clone()));
+            }
+        }
+
         self.recreate_deck();
         self.distribute_cards().unwrap();
+
         self.make_active(winner.clone());
+
     }
 
     fn can_swap_trump<'a>(&self, player: &'a Player) -> Option<&'a Card> {
