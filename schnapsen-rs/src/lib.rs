@@ -4,6 +4,7 @@ use std::fmt::write;
 use std::hash::Hash;
 use std::mem::take;
 use std::ops::Index;
+use std::process::exit;
 use std::sync::{Arc, RwLock};
 
 use futures::future::join_all;
@@ -884,7 +885,7 @@ impl SchnapsenDuo {
         }
     }
 
-    fn update_finish_round(&mut self, last_trick: Arc<RwLock<Player>>) -> Result<(), PlayerError> {
+    fn update_finish_round(&mut self, last_trick: Arc<RwLock<Player>>) -> Result<bool, PlayerError> {
         let comparison_result = self.notfiy_points().unwrap();
 
         let mut winner = comparison_result.winner;
@@ -904,7 +905,7 @@ impl SchnapsenDuo {
                     std::mem::swap(&mut winner.player, &mut loser.player);
                 }
             } else {
-                return Ok(());
+                return Ok(false);
             }
         }
 
@@ -939,7 +940,7 @@ impl SchnapsenDuo {
             .find(|player| player.read().unwrap().points >= 7)
             .is_none()
         {
-            return Ok(());
+            return Ok(true);
         }
 
         let mut res = HashMap::new();
@@ -956,7 +957,7 @@ impl SchnapsenDuo {
             ranked: res,
             winner: winner.player.read().unwrap().id.clone(),
         });
-        Ok(())
+        Ok(true)
     }
 
     pub fn calc_points(&self) -> Result<CardComparisonResult, PlayerError> {
@@ -1037,7 +1038,11 @@ impl SchnapsenDuo {
 
         won.write().unwrap().tricks.push(cards);
 
-        self.update_finish_round(won.clone())?;
+        let exited = self.update_finish_round(won.clone())?;
+
+        if exited {
+            return Ok(());
+        }
 
         if !self.deck.is_empty() && self.closed_talon.is_none() {
             self.draw_card_after_trick(won.clone())?;
