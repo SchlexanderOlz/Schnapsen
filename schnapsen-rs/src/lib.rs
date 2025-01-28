@@ -427,7 +427,7 @@ impl SchnapsenDuo {
     pub fn recreate_deck(&mut self) {
         self.deck = Self::populate_deck().into();
         self.players.iter().for_each(|player| {
-            player.as_ref().write().unwrap().reset();
+            player.write().unwrap().reset();
         });
     }
 
@@ -1073,7 +1073,7 @@ impl SchnapsenDuo {
         self.closed_talon = None;
         self.taken_trump = None;
 
-        self.make_active(winner.clone());
+        self.swap_to(winner.clone());
         for player in &self.players {
             let mut player_lock = player.write().unwrap();
 
@@ -1090,7 +1090,7 @@ impl SchnapsenDuo {
 
         self.distribute_cards().unwrap();
 
-        self.make_active(winner.clone());
+        self.swap_to(winner.clone());
 
     }
 
