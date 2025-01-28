@@ -128,7 +128,7 @@ impl SchnapsenDuoClient {
         instance_lock
             .notify_changes_playable_cards(&self.player.read().unwrap(), &announcement.cards);
 
-        self.player.try_write().unwrap().playable_cards = announcement.cards.to_vec();
+        self.player.write().unwrap().playable_cards = announcement.cards.to_vec();
         instance_lock.update_announcable_props(self.player.clone());
         instance_lock.update_finish_round(self.player.clone())?;
         Ok(())
@@ -137,14 +137,14 @@ impl SchnapsenDuoClient {
     fn update_player_state(&self) {
         let instance_lock = self.instance.lock().unwrap();
         let (_, announcable) = instance_lock.notify_announcable_props(&self.player.read().unwrap());
-        self.player.try_write().unwrap().announcable = announcable;
+        self.player.write().unwrap().announcable = announcable;
 
         let (_, can_swap) = instance_lock.notify_swap_trump_check(&self.player.read().unwrap());
-        self.player.try_write().unwrap().possible_trump_swap = can_swap;
+        self.player.write().unwrap().possible_trump_swap = can_swap;
 
         let playable_cards = instance_lock.find_playable_cards(self.player.clone());
         instance_lock.notify_changes_playable_cards(&self.player.read().unwrap(), &playable_cards);
 
-        self.player.try_write().unwrap().playable_cards = playable_cards.to_vec();
+        self.player.write().unwrap().playable_cards = playable_cards.to_vec();
     }
 }
