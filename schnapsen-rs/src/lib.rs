@@ -431,10 +431,7 @@ impl SchnapsenDuo {
         });
     }
 
-    pub fn distribute_cards(&mut self) -> Result<(), PlayerError> {
-        if self.active.is_none() {
-            return Err(PlayerError::NoPlayerActive);
-        }
+    fn distribute_cards(&mut self) -> Result<(), PlayerError> {
         let mut player_order: Vec<Arc<RwLock<Player>>> = self.players.iter().cloned().collect();
 
         if !Arc::ptr_eq(self.players.index(0), &self.active.clone().unwrap()) {
