@@ -1074,6 +1074,7 @@ impl SchnapsenDuo {
         self.active.replace(winner.clone());
         self.closed_talon = None;
         self.taken_trump = None;
+        self.stack.clear();
 
         for player in &self.players {
             let mut player_lock = player.write().unwrap();
