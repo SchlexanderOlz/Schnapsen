@@ -80,13 +80,13 @@ async fn listen_for_match_create(io: Arc<SocketIo>) {
         .await;
 }
 
-async fn register_server(modes: &[String]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+async fn register_server(modes: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let public_url = std::env::var("PUBLIC_ADDR").expect("SCHNAPSEN_DUO_PUBLIC_ADDR must be set");
     let private_url =
         std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
     let region = std::env::var("REGION").expect("REGION must be set");
 
-    Ok(join_all(modes.into_iter().map(|mode| {
+    join_all(modes.into_iter().map(|mode| {
         let server_info = gn_communicator::models::GameServerCreate {
             region: region.clone(),
             game: "Schnapsen".to_string(),
@@ -110,11 +110,8 @@ async fn register_server(modes: &[String]) -> Result<Vec<String>, Box<dyn std::e
                 .await
                 .unwrap()
         })
-    }))
-    .await
-    .into_iter()
-    .map(|x| x.unwrap())
-    .collect())
+    })).await;
+    Ok(())
 }
 
 async fn health_check(id: String) {
@@ -149,9 +146,9 @@ async fn main() {
 
     tokio::spawn(listen_for_match_create(io));
 
-    for uuid in server_ids {
-        tokio::spawn(run_health_check(uuid));
-    }
+    let private_url =
+        std::env::var("PRIVATE_ADDR").expect("SCHNAPSEN_DUO_PRIVATE_ADDR must be set");
+    tokio::spawn(run_health_check(private_url));
 
     let host_url = std::env::var("HOST_ADDR").expect("HOST_ADDR must be set");
     let listener = tokio::net::TcpListener::bind(host_url.as_str())
