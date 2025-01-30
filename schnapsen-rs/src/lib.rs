@@ -1086,6 +1086,8 @@ impl SchnapsenDuo {
             player_lock.cards.clear();
         }
 
+        self.notify_pub(PublicEvent::DeckCardCount(9));
+
         self.recreate_deck();
 
         self.distribute_cards().unwrap();

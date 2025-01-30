@@ -111,6 +111,10 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       stop = false
     });
 
+    client.on("round_result", async (result) => {
+      state = initDefaultState();
+    })
+
     client.on("self:trump_change_possible", async (card) => {
       let onSwap = async () => {
         await sleep(500)
