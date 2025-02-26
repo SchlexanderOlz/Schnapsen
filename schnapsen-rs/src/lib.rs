@@ -1,15 +1,9 @@
 use core::fmt;
 use std::collections::HashMap;
-use std::fmt::write;
 use std::hash::Hash;
-use std::mem::take;
 use std::ops::Index;
-use std::process::exit;
 use std::sync::{Arc, RwLock};
 
-use futures::future::join_all;
-use futures::lock::Mutex;
-use futures::FutureExt;
 use models::{contains_card_comb, has_announcable, Announcement};
 use models::{Card, Player};
 use rand::prelude::*;
@@ -19,6 +13,9 @@ use serde::Serialize;
 
 pub mod client;
 pub mod models;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug)]
 pub enum PlayerError {
@@ -78,7 +75,6 @@ impl PlayerError {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct PlayerPoint {
@@ -471,15 +467,25 @@ impl SchnapsenDuo {
 
         let player_id = self.active.as_ref().unwrap().read().unwrap().id.clone();
 
-        let priv_calls = self.priv_callbacks.get(&player_id).unwrap().clone();
-        tokio::task::spawn(join_all(callbacks).then(move |_| async move {
-            join_all(Self::notify(
-                priv_calls.clone(),
-                PrivateEvent::AllowPlayCard,
-            ))
-            .await;
-            join_all(Self::notify(priv_calls, PrivateEvent::AllowCloseTalon)).await;
-        }));
+        let priv_calls: Vec<Arc<dyn Fn(PrivateEvent) + Send + Sync>> = self
+            .priv_callbacks
+            .get(&player_id)
+            .unwrap_or(&vec![])
+            .clone();
+
+        std::thread::spawn(move || {
+            callbacks.into_iter().for_each(|callback| {
+                callback.join().unwrap();
+            });
+
+            Self::notify(priv_calls.clone(), PrivateEvent::AllowPlayCard)
+                .into_iter()
+                .for_each(|handle| handle.join().unwrap());
+
+            Self::notify(priv_calls, PrivateEvent::AllowCloseTalon)
+                .into_iter()
+                .for_each(|handle| handle.join().unwrap());
+        });
 
         Ok(())
     }
@@ -679,18 +685,18 @@ impl SchnapsenDuo {
     }
 
     // TODO: Change the return type to one simple JoinHandle
-    fn notify_pub(&self, event: PublicEvent) -> Vec<tokio::task::JoinHandle<()>> {
+    fn notify_pub(&self, event: PublicEvent) -> Vec<std::thread::JoinHandle<()>> {
         Self::notify(self.pub_callbacks.clone(), event)
     }
 
     fn notify<T: Clone + Send + Sync + 'static>(
         callbacks: Vec<Arc<dyn Fn(T) -> () + Send + Sync + 'static>>,
         event: T,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
+    ) -> Vec<std::thread::JoinHandle<()>> {
         let mut handles = Vec::new();
         for callback in callbacks.iter().cloned() {
             let clone = event.clone();
-            handles.push(tokio::task::spawn(async move { callback(clone) }));
+            handles.push(std::thread::spawn(move || callback(clone)));
         }
         handles
     }
@@ -699,12 +705,12 @@ impl SchnapsenDuo {
         &self,
         user_id: String,
         event: PrivateEvent,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
+    ) -> Vec<std::thread::JoinHandle<()>> {
         let mut handles = Vec::new();
         if let Some(callbacks) = self.priv_callbacks.get(&user_id).cloned() {
             for callback in callbacks {
                 let clone = event.clone();
-                handles.push(tokio::task::spawn(async move { callback(clone) }));
+                handles.push(std::thread::spawn(move || callback(clone)));
             }
         }
         handles
@@ -713,7 +719,7 @@ impl SchnapsenDuo {
     fn update_announcable_props(
         &self,
         player: Arc<RwLock<Player>>,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
+    ) -> Vec<std::thread::JoinHandle<()>> {
         let (callbacks, announcable) = self.notify_announcable_props(&player.read().unwrap());
         player.write().unwrap().announcable = announcable;
         callbacks
@@ -722,7 +728,7 @@ impl SchnapsenDuo {
     fn notify_announcable_props(
         &self,
         player: &Player,
-    ) -> (Vec<tokio::task::JoinHandle<()>>, Vec<Announcement>) {
+    ) -> (Vec<std::thread::JoinHandle<()>>, Vec<Announcement>) {
         let id = player.id.clone();
 
         let announcable_cards = self.can_announce_20(player);
@@ -784,7 +790,7 @@ impl SchnapsenDuo {
         (callbacks, announcable)
     }
 
-    fn update_swap_trump(&self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
+    fn update_swap_trump(&self, player: Arc<RwLock<Player>>) -> Vec<std::thread::JoinHandle<()>> {
         let (callbacks, can_swap) = self.notify_swap_trump_check(&player.read().unwrap());
 
         player.write().unwrap().possible_trump_swap = can_swap;
@@ -799,7 +805,7 @@ impl SchnapsenDuo {
     fn notify_swap_trump_check(
         &self,
         player: &Player,
-    ) -> (Vec<tokio::task::JoinHandle<()>>, Option<Card>) {
+    ) -> (Vec<std::thread::JoinHandle<()>>, Option<Card>) {
         let mut callbacks = Vec::new();
         let can_swap = player.possible_trump_swap.is_some();
         let id = player.id.clone();
@@ -840,7 +846,7 @@ impl SchnapsenDuo {
         self.make_active(player.clone());
     }
 
-    fn make_active(&mut self, player: Arc<RwLock<Player>>) -> Vec<tokio::task::JoinHandle<()>> {
+    fn make_active(&mut self, player: Arc<RwLock<Player>>) -> Vec<std::thread::JoinHandle<()>> {
         let user_id = self.active.insert(player).read().unwrap().id.clone();
 
         self.notify_pub(PublicEvent::Active { user_id })
@@ -887,7 +893,10 @@ impl SchnapsenDuo {
         }
     }
 
-    fn update_finish_round(&mut self, last_trick: Arc<RwLock<Player>>) -> Result<bool, PlayerError> {
+    fn update_finish_round(
+        &mut self,
+        last_trick: Arc<RwLock<Player>>,
+    ) -> Result<bool, PlayerError> {
         let comparison_result = self.notfiy_points().unwrap();
 
         let mut winner = comparison_result.winner;
@@ -1059,7 +1068,7 @@ impl SchnapsenDuo {
         Ok(())
     }
 
-    fn do_cards(&mut self, player: &mut Player) -> Vec<tokio::task::JoinHandle<()>> {
+    fn do_cards(&mut self, player: &mut Player) -> Vec<std::thread::JoinHandle<()>> {
         let card = self.deck.pop().unwrap();
         let mut callbacks =
             self.notify_priv(player.id.clone(), PrivateEvent::CardAvailabe(card.clone()));
@@ -1080,7 +1089,10 @@ impl SchnapsenDuo {
             let mut player_lock = player.write().unwrap();
 
             for card in player_lock.cards.iter() {
-                self.notify_priv(player_lock.id.clone(), PrivateEvent::CardUnavailabe(card.clone()));
+                self.notify_priv(
+                    player_lock.id.clone(),
+                    PrivateEvent::CardUnavailabe(card.clone()),
+                );
             }
 
             player_lock.cards.clear();
@@ -1114,7 +1126,7 @@ impl SchnapsenDuo {
         &self,
         player: &Player,
         playable: &[Card],
-    ) -> Vec<tokio::task::JoinHandle<()>> {
+    ) -> Vec<std::thread::JoinHandle<()>> {
         let mut callbacks: Vec<_> = playable
             .iter()
             .filter_map(|card| {
@@ -1146,7 +1158,7 @@ impl SchnapsenDuo {
     fn update_playable_cards(
         &self,
         player: Arc<RwLock<Player>>,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
+    ) -> Vec<std::thread::JoinHandle<()>> {
         let playable_cards = self.find_playable_cards(player.clone());
 
         let callbacks =
