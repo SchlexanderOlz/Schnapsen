@@ -68,6 +68,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     channel.ack(msg);
 
     let state: State = initDefaultState();
+    state.ki_level = 4;
 
     switch (task.ai_id) {
       case bugo_hoss_id:

@@ -231,7 +231,7 @@ impl WriteMatchManager {
     fn on_match_result(self: Arc<Self>, winner: String) {
         if self.bummerl {
             let match_manager = self.clone();
-            tokio::spawn(async move {
+            async_std::task::spawn(async move {
                 let reset_time = chrono::Utc::now().timestamp_micros() as u64;
                 for sockets in match_manager
                     .write_connected
@@ -241,7 +241,7 @@ impl WriteMatchManager {
                     .cloned()
                 {
                     sockets.into_iter().for_each(move |socket| {
-                        tokio::spawn(async move {
+                        async_std::task::spawn(async move {
                             let mut event = HashMap::new();
                             event.insert("timestamp", reset_time);
                             socket.lock().await.emit("reset", event).unwrap();
@@ -249,7 +249,7 @@ impl WriteMatchManager {
                     });
                 }
 
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                async_std::task::sleep(Duration::from_secs(5)).await;
 
                 self.round_begin_timestamp.store(
                     reset_time,
