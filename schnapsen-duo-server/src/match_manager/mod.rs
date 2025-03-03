@@ -382,7 +382,7 @@ impl WriteMatchManager {
     async fn await_timeout(self: Arc<Self>, mut rx: Receiver<bool>, player_id: String) {
         select! {
             _ = rx.changed() => { },
-            _ = tokio::time::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
+            _ = async_std::task::sleep(Duration::from_secs(FORCE_MOVE_TIMEOUT)) => {
                 let mut losers = HashMap::new();
                 losers.insert(player_id.clone(), 0 as u8);
 
