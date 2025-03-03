@@ -1092,7 +1092,7 @@ impl SchnapsenDuo {
                 self.notify_priv(
                     player_lock.id.clone(),
                     PrivateEvent::CardUnavailabe(card.clone()),
-                );
+                ).into_iter().for_each(|handle| handle.join().unwrap());
             }
 
             player_lock.cards.clear();
