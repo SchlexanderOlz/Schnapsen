@@ -68,7 +68,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     channel.ack(msg);
 
     let state: State = initDefaultState();
-    state.ki_level = 4;
+    let ai_level = 4
 
     switch (task.ai_id) {
       case bugo_hoss_id:
@@ -81,6 +81,8 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
         state.ki_level = 4;
         break;
     }
+
+    state.ki_level = ai_level;
 
     task.address = `http://${task.address}`
 
@@ -114,6 +116,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("round_result", async (result) => {
       state = initDefaultState();
+      state.ki_level = ai_level;
     })
 
     client.on("self:trump_change_possible", async (card) => {
