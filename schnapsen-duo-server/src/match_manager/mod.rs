@@ -437,7 +437,7 @@ impl WriteMatchManager {
             .lock()
             .unwrap()
             .on_priv_event(player, move |event| {
-                tokio::task::spawn(self.clone().play_card_or_timeout(event, player_id.clone()));
+                async_std::task::spawn(self.clone().play_card_or_timeout(event, player_id.clone()));
             });
     }
 
@@ -548,7 +548,7 @@ impl WriteMatchManager {
             .on_priv_event(player.clone(), move |event| {
                 debug!("Got private event: {:?}", event);
                 let socket_clone = socket_clone.clone();
-                tokio::task::spawn(async move {
+                async_std::task::spawn(async move {
                     if let Err(err) = emitter::to_private_event_emitter(
                         &event.into() as &TimedEvent<PrivateEvent>
                     )(socket_clone.lock().await.clone())
