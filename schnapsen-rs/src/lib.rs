@@ -555,6 +555,9 @@ impl SchnapsenDuo {
         card: Card,
     ) -> Result<Card, PlayerError> {
         let player = &player.read().unwrap();
+        if self.active.is_none() || !self.is_active(player) {
+            return Err(PlayerError::PlayerNotActive);
+        }
         if let Some(swap) = self.can_swap_trump(player) {
             if *swap != card {
                 return Err(PlayerError::CantSwapTrump);
@@ -1094,7 +1097,9 @@ impl SchnapsenDuo {
                 self.notify_priv(
                     player_lock.id.clone(),
                     PrivateEvent::CardUnavailabe(card.clone()),
-                ).into_iter().for_each(|handle| handle.join().unwrap());
+                )
+                .into_iter()
+                .for_each(|handle| handle.join().unwrap());
             }
 
             player_lock.cards.clear();
@@ -1111,11 +1116,7 @@ impl SchnapsenDuo {
     }
 
     fn can_swap_trump<'a>(&self, player: &'a Player) -> Option<&'a Card> {
-        if self.active.is_none()
-            || self.trump.is_none()
-            || !self.stack.is_empty()
-            || self.closed_talon.is_some()
-        {
+        if self.trump.is_none() || !self.stack.is_empty() || self.closed_talon.is_some() {
             return None;
         }
 
