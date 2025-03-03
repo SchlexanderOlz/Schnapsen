@@ -334,7 +334,7 @@ impl WriteMatchManager {
 
         for socket in self.get_sockets(&player_id) {
             let timeout = timeout.clone();
-            tokio::spawn(async move {
+            async_std::task::spawn(async move {
                 emitter::to_private_event_emitter(&timeout)(socket.lock().await.clone())
             });
         }
@@ -348,7 +348,7 @@ impl WriteMatchManager {
 
         for socket in self.get_sockets(&player_id) {
             let threat_close = threat_close.clone();
-            tokio::spawn(async move {
+            async_std::task::spawn(async move {
                 emitter::to_private_event_emitter(&threat_close)(socket.lock().await.clone())
             });
         }
