@@ -124,6 +124,10 @@ async fn run_health_check(id: String) -> ! {
         debug!("Waiting for send health-check");
         interval.tick().await;
         health_check(id.clone()).await;
+        let server_ids = register_server(&["speed".to_string(), "bummerl".to_string()])
+            .await
+            .unwrap();
+        info!("Registered servers as {:?}", server_ids);
         debug!("Sent health-check");
     }
 }
@@ -138,11 +142,6 @@ async fn main() {
 
     let (layer, io) = socketioxide::SocketIo::new_layer();
     let io = Arc::new(io);
-
-    let server_ids = register_server(&["speed".to_string(), "bummerl".to_string()])
-        .await
-        .unwrap();
-    info!("Registered servers as {:?}", server_ids);
 
     tokio::spawn(listen_for_match_create(io));
 
