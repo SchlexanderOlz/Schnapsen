@@ -920,6 +920,8 @@ impl SchnapsenDuo {
             }
         }
 
+        self.active = None;
+
         let points;
         if loser.points == 0 {
             points = 3;
