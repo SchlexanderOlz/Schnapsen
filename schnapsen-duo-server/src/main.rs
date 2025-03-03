@@ -43,7 +43,7 @@ async fn notify_match_result(result: gn_communicator::models::MatchResult) {
 
 fn setup_match_result_handler(match_manager: Arc<match_manager::WriteMatchManager>) {
     match_manager.on_exit(move |event| {
-        tokio::spawn(async move {
+        async_std::task::spawn(async move {
             if let Ok(result) = event {
                 notify_match_result(result.into()).await;
             } else if let Err(reason) = event {
