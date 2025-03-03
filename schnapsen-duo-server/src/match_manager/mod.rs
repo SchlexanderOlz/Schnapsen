@@ -251,10 +251,8 @@ impl WriteMatchManager {
 
                 async_std::task::sleep(Duration::from_secs(5)).await;
 
-                self.round_begin_timestamp.store(
-                    reset_time,
-                    std::sync::atomic::Ordering::SeqCst,
-                );
+                self.round_begin_timestamp
+                    .store(reset_time, std::sync::atomic::Ordering::SeqCst);
 
                 let mut instance_lock = match_manager.instance.lock().unwrap();
                 let player = instance_lock.get_player(&winner).unwrap();
@@ -480,10 +478,14 @@ impl WriteMatchManager {
 
             let logger = logger.clone();
             instance_lock.on_priv_event(player.clone(), move |event| {
-                logger.lock().unwrap().log(
-                    SchnapsenDuoEventType::Private(event).into(),
-                    Some(player.read().unwrap().id.clone()),
-                );
+                let logger = logger.clone();
+                let player = player.clone();
+                std::thread::spawn(move || {
+                    logger.lock().unwrap().log(
+                        SchnapsenDuoEventType::Private(event).into(),
+                        Some(player.read().unwrap().id.clone()),
+                    );
+                });
             });
         }
 
