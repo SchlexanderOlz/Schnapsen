@@ -449,7 +449,7 @@ impl WriteMatchManager {
         for (k, sockets) in self.write_connected.read().unwrap().clone().into_iter() {
             for socket in sockets {
                 let timeout = timeout.clone();
-                tokio::task::spawn(async move {
+                async_std::task::spawn(async move {
                     let lock = socket.lock().await;
                     lock.emit("timeout", timeout.clone()).unwrap();
                 });
