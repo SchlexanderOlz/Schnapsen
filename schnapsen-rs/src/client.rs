@@ -124,12 +124,13 @@ impl SchnapsenDuoClient {
             .announcable
             .retain(|x| *x == announcement);
 
-        let instance_lock = self.instance.lock().unwrap();
+        let mut instance_lock = self.instance.lock().unwrap();
         instance_lock
             .notify_changes_playable_cards(&self.player.read().unwrap(), &announcement.cards);
 
         self.player.write().unwrap().playable_cards = announcement.cards.to_vec();
         instance_lock.update_announcable_props(self.player.clone());
+        instance_lock.update_finish_round(self.player.clone())?;
         Ok(())
     }
 
