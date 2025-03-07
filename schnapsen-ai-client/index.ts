@@ -132,6 +132,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
     });
 
     client.on("error", async (error) => {
+      await sleep(1000)
       client.playCard(
         client.cardsPlayable[
           Math.floor(Math.random() * client.cardsPlayable.length)
