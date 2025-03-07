@@ -131,7 +131,13 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       client.on("self:allow_swap_trump", onSwap)
     });
 
+    let tried_replays = 0;
+    const replay_cap = 10;
     client.on("error", async (error) => {
+      if (tried_replays++ >= replay_cap) {
+        console.error("Fatal ERROR")
+        return;
+      }
       await sleep(1000)
       client.playCard(
         client.cardsPlayable[
