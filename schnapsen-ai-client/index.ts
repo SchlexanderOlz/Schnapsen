@@ -185,6 +185,10 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       }
     })
 
+    client.on("error", async (error) => {
+      console.log("Error", error);
+    })
+
     client.on("play_card", async (event) => {
       // @ts-ignore
       // state[intoStateCard(event.data.card) as keyof State] = 2;
