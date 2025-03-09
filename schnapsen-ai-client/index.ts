@@ -93,6 +93,22 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     client.on("self:allow_announce", async () => {
       stop = true
+
+      let err_callback = async (error: any) => {
+        if (!stop) {
+          return;
+        }
+
+        await sleep(1000)
+        client.playCard(
+          client.cardsPlayable[
+            Math.floor(Math.random() * client.cardsPlayable.length)
+          ]
+        );
+        client.off("error", err_callback)
+      }
+
+      client.on("error", err_callback)
       await sleep(1000)
 
       if (played_card || client.announceable![0] === undefined) {
@@ -112,6 +128,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       client.playCard(announcement.data.cards[0]);
       await sleep(1000)
       stop = false
+      client.off("error", err_callback)
     });
 
     client.on("round_result", async (result) => {
@@ -130,29 +147,6 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
       client.on("self:allow_swap_trump", onSwap)
     });
-
-    let tried_replay = false;
-    const replay_cap = 10;
-    client.on("error", async (error) => {
-      if (tried_replay) {
-        console.error("Fatal ERROR")
-        return;
-      }
-      tried_replay = true;
-      await sleep(1000)
-      client.playCard(
-        client.cardsPlayable[
-          Math.floor(Math.random() * client.cardsPlayable.length)
-        ]
-      );
-      console.error(error);
-      console.log("Error occured, playing random card");
-    })
-
-    client.on("reset", async () => {
-      tried_replay = false;
-    })
-
 
     client.on("self:allow_play_card", async () => {
       played_card = false
