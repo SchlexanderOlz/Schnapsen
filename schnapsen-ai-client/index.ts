@@ -131,13 +131,14 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       client.on("self:allow_swap_trump", onSwap)
     });
 
-    let tried_replays = 0;
+    let tried_replay = false;
     const replay_cap = 10;
     client.on("error", async (error) => {
-      if (tried_replays++ >= replay_cap) {
+      if (tried_replay) {
         console.error("Fatal ERROR")
         return;
       }
+      tried_replay = true;
       await sleep(1000)
       client.playCard(
         client.cardsPlayable[
@@ -146,6 +147,10 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
       );
       console.error(error);
       console.log("Error occured, playing random card");
+    })
+
+    client.on("reset", async () => {
+      tried_replay = false;
     })
 
 
