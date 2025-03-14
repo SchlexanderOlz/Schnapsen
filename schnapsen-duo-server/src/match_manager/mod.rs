@@ -249,7 +249,7 @@ impl WriteMatchManager {
                     });
                 }
 
-                async_std::task::sleep(Duration::from_secs(5)).await;
+                async_std::task::sleep(Duration::from_secs(option_env!("NEXT_ROUND_DELAY").unwrap().parse().unwrap())).await;
 
                 self.round_begin_timestamp
                     .store(reset_time, std::sync::atomic::Ordering::SeqCst);
