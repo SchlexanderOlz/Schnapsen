@@ -1,0 +1,34 @@
+name: Publish schnapsen-rs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - schnapsen-rs/Cargo.toml
+      - schnapsen-rs/src/**
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: schnapsen-rs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check version against crates.io
+        id: check
+        run: |
+          LOCAL=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          PUBLISHED=$(curl -sf https://crates.io/api/v1/crates/schnapsen-rs \
+            -H 'User-Agent: github-actions publish-check' \
+            | jq -r '.crate.newest_version // "none"')
+          echo "local=$LOCAL"
+          echo "published=$PUBLISHED"
+          [ "$LOCAL" != "$PUBLISHED" ] && echo "changed=true" >> "$GITHUB_OUTPUT" || echo "changed=false" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        if: steps.check.outputs.changed == 'true'
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
