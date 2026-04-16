@@ -114,6 +114,7 @@ async fn register_server(modes: &[String]) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+
 async fn health_check(id: String) {
     communicator.get().await.send_health_check(id).await;
 }
@@ -128,7 +129,7 @@ async fn run_health_check(id: String) -> ! {
             .await
             .unwrap();
         info!("Registered servers as {:?}", server_ids);
-        debug!("Sent health-check");
+debug!("Sent health-check");
     }
 }
 

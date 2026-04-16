@@ -1,8 +1,37 @@
-FROM oven/bun:1 AS base
+# Build context: game-night root directory
+# Builds local TS libraries, then runs the AI client with Bun.
+
+# ── Stage 1: build gn-matchmaker-client ──────────────────────────────────────
+FROM oven/bun:1 AS matchmaker-builder
+WORKDIR /build/matchmaker-client
+COPY matchmaker-client-ts/package.json ./
+RUN bun install
+COPY matchmaker-client-ts/ ./
+RUN bun run build && bun run prepare
+RUN sed -i 's|"module": "index.ts"|"module": "index.js"|g' package.json
+
+# ── Stage 2: build gn-schnapsen-client ───────────────────────────────────────
+FROM oven/bun:1 AS schnapsen-client-builder
+COPY --from=matchmaker-builder /build/matchmaker-client /build/matchmaker-client
+WORKDIR /build/schnapsen-client
+COPY gn-schnapsen-client/package.json ./
+RUN sed -i 's|"gn-matchmaker-client": "[^"]*"|"gn-matchmaker-client": "file:/build/matchmaker-client"|g' package.json
+RUN bun install
+COPY gn-schnapsen-client/ ./
+RUN bun run build && bun run prepare
+
+# ── Stage 3: app ─────────────────────────────────────────────────────────────
+FROM oven/bun:1
 WORKDIR /usr/src/app
 
-COPY . .
+COPY Schnapsen/schnapsen-ai-client/package.json Schnapsen/schnapsen-ai-client/bun.lock* ./
+RUN bun install
 
-RUN bun i
+COPY --from=matchmaker-builder  /build/matchmaker-client   /usr/src/app/node_modules/gn-matchmaker-client
+COPY --from=schnapsen-client-builder /build/schnapsen-client /usr/src/app/node_modules/gn-schnapsen-client
+COPY --from=matchmaker-builder  /build/matchmaker-client   /usr/src/app/node_modules/gn-schnapsen-client/node_modules/gn-matchmaker-client
+
+COPY Schnapsen/schnapsen-ai-client/ ./
 
 USER bun
+CMD ["bun", "run", "index.ts"]

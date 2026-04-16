@@ -13,10 +13,25 @@ import {
 const AI_TASK_QUEUE = "ai-task-generate-request";
 const AI_REGISTER_QUEUE = "ai-register";
 
-amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
+async function connectWithRetry(url: string): Promise<amqplib.Connection> {
+  console.log(`Connecting to RabbitMQ at: ${url}`);
+  while (true) {
+    try {
+      const conn = await amqplib.connect(url + "?frameMax=131072");
+      console.log(`Successfully connected to RabbitMQ at: ${url}`);
+      return conn;
+    } catch (err: any) {
+      console.log(`RabbitMQ connection failed (${err?.message ?? err}), retrying in 3s...`);
+      await sleep(3000);
+    }
+  }
+}
+
+connectWithRetry(process.env.AMQP_URL!).then(async (conn) => {
+  console.log("Connected to RabbitMQ");
   let channel = await conn.createChannel();
-  channel.assertQueue(AI_TASK_QUEUE, { durable: false });
-  channel.assertQueue(AI_REGISTER_QUEUE, { durable: false });
+  await channel.assertQueue(AI_TASK_QUEUE, { durable: false });
+  await channel.assertQueue(AI_REGISTER_QUEUE, { durable: false });
 
   let bugo_hoss = {
     game: "Schnapsen",
@@ -49,6 +64,7 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
   registerAIFor(bugo_hoss, ["speed", "bummerl"])
   registerAIFor(lalph_raulen, ["speed", "bummerl"])
   registerAIFor(kolfgang_woscher, ["speed", "bummerl"])
+  console.log("AI players registered");
 
   channel.consume(AI_TASK_QUEUE, async (msg) => {
     let stop = false;
@@ -84,7 +100,9 @@ amqplib.connect(process.env.AMQP_URL!).then(async (conn) => {
 
     state.ki_level = ai_level;
 
-    task.address = `http://${task.address}`
+    if (!task.address.startsWith("http://") && !task.address.startsWith("https://")) {
+      task.address = `http://${task.address}`;
+    }
 
     console.log(task.address)
     let client = new SchnapsenClient(task.write, task as Match);
